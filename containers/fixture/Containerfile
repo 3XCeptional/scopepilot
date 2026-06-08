@@ -1,0 +1,39 @@
+# ============================================================================
+# ScopePilot Test Fixture — synthetic HTTP server for integration tests
+# Uses a minimal Alpine-based Go build.
+# ============================================================================
+FROM golang:1.26-alpine@sha256:e6dc5e1daecac7eb7f1793fbbb88051171d9d2f9794ede4a36f94a97b9896487 AS builder
+
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy only what's needed
+COPY containers/fixture/main.go ./containers/fixture/main.go
+
+ARG TARGETARCH=arm64
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build \
+      -buildvcs=false \
+      -ldflags="-s -w -extldflags=-static" \
+      -o /fixture \
+      ./containers/fixture/
+
+# ============================================================================
+# Runtime stage — tiny Alpine
+# ============================================================================
+FROM alpine:3.21
+
+RUN apk add --no-cache ca-certificates && \
+    adduser -D -u 10001 -h /nonexistent -s /sbin/nologin scopepilot
+
+COPY --from=builder /fixture /fixture
+
+USER 10001
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
+  CMD wget --no-verbose --tries=1 --spider http://localhost:8080/health || exit 1
+
+ENTRYPOINT ["/fixture"]

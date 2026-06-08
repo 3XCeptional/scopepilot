@@ -1,0 +1,52 @@
+# ============================================================================
+# Stage 1 — Build the ScopePilot Go binary
+# ============================================================================
+FROM golang:1.26-alpine AS builder
+
+# Install CA certificates for TLS
+RUN apk add --no-cache ca-certificates
+
+# Set up build environment
+WORKDIR /src
+COPY go.mod go.sum ./
+RUN go mod download
+
+# Copy the full source tree (excluding what .dockerignore/containerignore hides)
+COPY . .
+
+# Build the static binary with no cgo, stripped symbols, arm64 for Apple Silicon
+# The -buildvcs=false avoids git dependency in the hermetic build container
+ARG TARGETARCH=arm64
+RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
+    go build \
+      -buildvcs=false \
+      -ldflags="-s -w -extldflags=-static" \
+      -o /scopepilot \
+      ./cmd/pentest/
+
+# ============================================================================
+# Stage 2 — Minimal runtime image
+# ============================================================================
+FROM gcr.io/distroless/static-debian12:nonroot
+
+# Copy the binary and TLS certificates from the builder
+COPY --from=builder /scopepilot /scopepilot
+COPY --from=builder /etc/ssl/certs /etc/ssl/certs
+
+# Create a dedicated non-root user (uid 10001) — distroless nonroot is 65532,
+# but we explicitly set uid 10001 as required.
+USER 10001
+
+# Security hardening
+LABEL maintainer="ScopePilot Team"
+LABEL description="ScopePilot — scope-enforcing HTTP proxy with MCP tool server"
+
+# Drop all capabilities, enforce no-new-privs, read-only rootfs
+# These are enforced at runtime via the container runtime (Podman), not the
+# Containerfile itself (except USER which is baked in).
+
+EXPOSE 8443
+EXPOSE 9090
+
+ENTRYPOINT ["/scopepilot"]
+CMD ["server", "--listen-proxy=:8443", "--listen-mcp=:9090"]

@@ -1,0 +1,48 @@
+# Binaries
+pentest
+*.exe
+*.test
+*.out
+
+# Secrets
+.env
+*.pem
+*.key
+*.crt
+secrets/
+
+# VPN config (except example)
+vpn/*.conf
+!vpn/*.conf.example
+
+# Database
+*.db
+*.sqlite
+pgdata/
+
+# Reports (may contain sensitive findings)
+reports/
+
+# Build artifacts
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Evidence (sensitive)
+evidence/
+
+# Wordlists (large)
+wordlists/custom/
+*.wordlist.large
+
+# Hermes
+.hermes/

@@ -1,0 +1,14 @@
+.git
+.gitignore
+.env
+*.md
+docs/
+test/
+*.test
+*.out
+secrets/
+reports/
+evidence/
+.venv/
+.vscode/
+.idea/
