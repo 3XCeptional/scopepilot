@@ -17,7 +17,7 @@
 # ============================================================================
 
 SHELL := /bin/bash
-.PHONY: doctor build test test-unit test-integration lint up down status logs clean remove shell rebuild
+.PHONY: doctor build build-containers test test-unit test-integration lint install-tools up down status logs clean remove shell rebuild
 
 # --------------------------------------------------------------------------
 # Tool detection
@@ -75,9 +75,18 @@ build: _require_podman _require_go
 	@echo "=== Building Go binary ==="
 	CGO_ENABLED=0 go build -ldflags="-s -w" -o bin/pentest ./cmd/pentest/
 	@echo "=== Building container images ==="
-	podman build --platform=linux/arm64 -t scopepilot:latest -f containers/scopepilot/Containerfile .
-	podman build --platform=linux/arm64 -t scopepilot-fixture:latest -f containers/fixture/Containerfile .
+	$(MAKE) build-containers
 	@echo "[DONE] Build complete"
+
+## build-containers — Build all container images (without Go binary)
+build-containers: _require_podman
+	@echo "=== Building scope proxy container ==="
+	$(PODMAN) build --platform=linux/arm64 -t scopepilot:latest -f containers/scopepilot/Containerfile .
+	@echo "=== Building fixture container ==="
+	$(PODMAN) build --platform=linux/arm64 -t scopepilot-fixture:latest -f containers/fixture/Containerfile .
+	@echo "=== Building VPN wireguard container ==="
+	$(PODMAN) build --platform=linux/arm64 -t scopepilot-wireguard:latest -f containers/wireguard/Containerfile .
+	@echo "=== Container images built ==="
 
 ## test — Run all Go tests with race detection
 test: _require_go

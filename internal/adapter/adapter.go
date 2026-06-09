@@ -169,17 +169,19 @@ type BBOTConfig struct {
 	MCPClient  *MCPClient
 	DryRun     bool // If true, only check scope, don't execute BBOT
 	Timeout    time.Duration
-	ProxyURL   string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	ProxyURL   string           // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	VPNContainer string         // Container name for VPN namespace sharing (--network container:)
 }
 
 // NucleiConfig holds configuration for the Nuclei adapter.
 type NucleiConfig struct {
-	BinaryPath  string // Path to nuclei binary
-	MCPClient   *MCPClient
-	DryRun      bool
-	Timeout     time.Duration
-	TemplateDir string // Path to nuclei templates
-	ProxyURL    string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	BinaryPath   string // Path to nuclei binary
+	MCPClient    *MCPClient
+	DryRun       bool
+	Timeout      time.Duration
+	TemplateDir  string // Path to nuclei templates
+	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	VPNContainer string // Container name for VPN namespace sharing (--network container:)
 }
 
 // BBOTResult holds structured results from a BBOT scan.

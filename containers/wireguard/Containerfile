@@ -1,0 +1,97 @@
+# ScopePilot VPN Gateway Container
+# Provides WireGuard VPN routing for worker containers via namespace sharing.
+#
+# Uses boringtun (userspace WireGuard) when kernel module is unavailable
+# (e.g., rootless Podman on macOS). Falls back to kernel WireGuard when
+# available. The kill-switch blocks all non-WireGuard egress traffic.
+#
+# Run via the VPN controller (internal/vpn), not directly.
+# The controller mounts a WireGuard config at /config/wg0.conf.
+#
+# Usage (manual):
+#   podman run -d --name scopepilot-vpn-gateway \
+#     --cap-add NET_ADMIN \
+#     -v /path/to/wg0.conf:/config/wg0.conf:ro \
+#     localhost/scopepilot-wireguard:latest
+
+FROM docker.io/alpine:3.21
+
+RUN apk add --no-cache \
+    wireguard-tools \
+    curl \
+    iptables \
+    ip6tables \
+    boringtun \
+    && rm -rf /var/cache/apk/*
+
+COPY <<"EOF" /entrypoint.sh
+#!/bin/sh
+set -e
+
+CONFIG="${WG_CONFIG:-/config/wg0.conf}"
+
+if [ ! -f "$CONFIG" ]; then
+    echo "ERROR: WireGuard config not found at $CONFIG"
+    echo "Mount your config to $CONFIG or set WG_CONFIG env var"
+    exit 1
+fi
+
+echo "Starting WireGuard with config: $CONFIG"
+
+# Use boringtun (userspace) when kernel module unavailable.
+# This is the common case for rootless Podman on macOS.
+if ! lsmod 2>/dev/null | grep -q wireguard; then
+    echo "Kernel WireGuard module not found — using boringtun (userspace)"
+    export WG_QUICK_USERSPACE_IMPLEMENTATION=boringtun
+fi
+
+# Bring up the WireGuard interface.
+# wg-quick already sets up its own firewall rules (via fwmark) to
+# protect the tunnel. Our kill-switch adds an additional blanket
+# default-deny layer.
+wg-quick up "$CONFIG"
+
+echo "WireGuard interface is up."
+
+# Enable kill switch if KILLSWITCH=true — blocks all traffic that
+# doesn't go through the WireGuard interface. This is a belt-and-
+# suspenders layer on top of wg-quick's built-in fwmark routing.
+if [ "${KILLSWITCH}" = "true" ]; then
+    echo "Enabling VPN kill switch..."
+
+    # IPv4 — default deny all outbound
+    iptables -P OUTPUT DROP
+    iptables -A OUTPUT -o wg0 -j ACCEPT
+    iptables -A OUTPUT -o lo -j ACCEPT
+    iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    # IPv6 — same rules, preventing IP leak via v6
+    ip6tables -P OUTPUT DROP
+    ip6tables -A OUTPUT -o wg0 -j ACCEPT
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+    ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+
+    echo "Kill switch enabled — only traffic through wg0 is allowed."
+fi
+
+echo "WireGuard connected. Container will stay alive."
+
+# Keep the container running and monitor the tunnel.
+while true; do
+    # Check WireGuard interface status via wg show.
+    if ! wg show 2>/dev/null | grep -q "interface:"; then
+        echo "WARNING: WireGuard interface not found. Attempting reconnect..."
+        # Take the interface down first if it's partially up.
+        wg-quick down "$CONFIG" 2>/dev/null || true
+        # Bring it back up.
+        wg-quick up "$CONFIG" 2>/dev/null || true
+    fi
+    sleep 30
+done
+EOF
+
+RUN chmod +x /entrypoint.sh
+
+EXPOSE 51820/udp
+
+CMD ["/entrypoint.sh"]

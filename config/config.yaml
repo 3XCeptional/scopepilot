@@ -3,6 +3,10 @@
 global:
   kill_switch:
     enabled: false
+  vpn:
+    enabled: false
+    wg_config_path: /etc/scopepilot/wg0.conf
+    kill_switch: true
   defaults:
     requests_per_second_per_host: 5
     max_concurrency: 5

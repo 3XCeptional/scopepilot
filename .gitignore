@@ -1,5 +1,5 @@
 # Binaries
-pentest
+/pentest
 *.exe
 *.test
 *.out

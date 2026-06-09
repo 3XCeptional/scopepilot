@@ -240,3 +240,44 @@ func TestDuplicateProgramID(t *testing.T) {
 func TestMain(m *testing.M) {
 	os.Exit(m.Run())
 }
+
+func TestGlobalVPNValidation(t *testing.T) {
+	tests := []struct {
+		name    string
+		vpn     GlobalVPNConfig
+		wantErr bool
+	}{
+		{
+			name:    "vpn disabled no config required",
+			vpn:     GlobalVPNConfig{Enabled: false},
+			wantErr: false,
+		},
+		{
+			name:    "vpn enabled requires wg_config_path",
+			vpn:     GlobalVPNConfig{Enabled: true, WGConfigPath: ""},
+			wantErr: true,
+		},
+		{
+			name:    "vpn enabled with config is valid",
+			vpn:     GlobalVPNConfig{Enabled: true, WGConfigPath: "/etc/wireguard/wg0.conf"},
+			wantErr: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			g := GlobalConfig{
+				Defaults: DefaultsConfig{
+					RequestsPerSecondPerHost: 2,
+					MaxConcurrency:           4,
+					MaxResponseBytes:         5242880,
+				},
+				VPN: tt.vpn,
+			}
+			err := g.Validate()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("Validate() error = %v, wantErr = %v", err, tt.wantErr)
+			}
+		})
+	}
+}

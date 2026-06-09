@@ -53,11 +53,19 @@ type AuditConfig struct {
 	RedactSecrets bool `yaml:"redact_secrets" json:"redact_secrets"`
 }
 
-// GlobalVPNConfig is the global VPN policy.
+// GlobalVPNConfig is the global VPN policy for worker container egress.
+// When enabled, the VPN controller starts a WireGuard gateway container
+// and worker containers share its network namespace (--network container:)
+// for VPN-routed egress. Management interfaces stay on the host network.
 type GlobalVPNConfig struct {
-	Enabled bool   `yaml:"enabled" json:"enabled"`
-	Country string `yaml:"country" json:"country"`
-	Server  string `yaml:"server" json:"server"`
+	Enabled         bool   `yaml:"enabled" json:"enabled"`               // Enable VPN gateway
+	Country         string `yaml:"country" json:"country"`               // Preferred VPN server country
+	Server          string `yaml:"server" json:"server"`                 // Specific VPN server name
+	WGConfigPath    string `yaml:"wg_config_path" json:"wg_config_path"` // Host path to WireGuard config file (required when enabled)
+	ContainerName   string `yaml:"container_name" json:"container_name"` // Podman container name override
+	ContainerImage  string `yaml:"container_image" json:"container_image"` // OCI image override
+	KillSwitch      bool   `yaml:"kill_switch" json:"kill_switch"`       // Block traffic if VPN drops
+	PodmanBinary    string `yaml:"podman_binary" json:"podman_binary"`   // Path to podman binary
 }
 
 // SandboxConfig controls the malware sandbox.
@@ -164,6 +172,9 @@ func (g *GlobalConfig) Validate() error {
 	}
 	if g.LogLevel != "" && g.LogLevel != "debug" && g.LogLevel != "info" && g.LogLevel != "warn" && g.LogLevel != "error" {
 		return fmt.Errorf("log_level must be debug, info, warn, or error")
+	}
+	if g.VPN.Enabled && g.VPN.WGConfigPath == "" {
+		return fmt.Errorf("vpn.wg_config_path is required when vpn is enabled")
 	}
 	return nil
 }
