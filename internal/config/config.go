@@ -23,6 +23,7 @@ type GlobalConfig struct {
 	KillSwitch KillSwitchConfig `yaml:"kill_switch" json:"kill_switch"`
 	Defaults   DefaultsConfig   `yaml:"defaults" json:"defaults"`
 	Audit      AuditConfig      `yaml:"audit" json:"audit"`
+	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	VPN        GlobalVPNConfig  `yaml:"vpn" json:"vpn"`
 	Sandbox    SandboxConfig    `yaml:"sandbox" json:"sandbox"`
 	LogLevel   string           `yaml:"log_level" json:"log_level"`
@@ -51,6 +52,13 @@ type AuditConfig struct {
 	Enabled       bool `yaml:"enabled" json:"enabled"`
 	RetainDays    int  `yaml:"retain_days" json:"retain_days"`
 	RedactSecrets bool `yaml:"redact_secrets" json:"redact_secrets"`
+}
+
+// DatabaseConfig controls PostgreSQL connection (optional).
+type DatabaseConfig struct {
+	ConnString string `yaml:"connection_string" json:"connection_string"` // PostgreSQL connection URI
+	Enabled    bool   `yaml:"enabled" json:"enabled"`                    // Enable PostgreSQL storage
+	MaxConns   int32  `yaml:"max_connections" json:"max_connections"`    // Max pool connections (default: 10)
 }
 
 // GlobalVPNConfig is the global VPN policy for worker container egress.

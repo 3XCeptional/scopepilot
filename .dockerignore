@@ -1,0 +1,27 @@
+# Reduce Docker/Podman build context
+.git/
+.gitignore
+.gitattributes
+.vscode/
+.idea/
+*.swp
+.DS_Store
+*.test
+*.out
+bin/
+.venv*
+.hermes/
+node_modules/
+__pycache__/
+*.pyc
+.env
+secrets/
+vpn/*.conf
+wordlists/
+reports/
+evidence/
+pgdata/
+*.db
+*.sqlite
+.demo-browser/
+.playwright-browsers/

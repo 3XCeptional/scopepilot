@@ -11,6 +11,7 @@ import (
 
 	"github.com/dhiren/pentest-automation/internal/audit"
 	"github.com/dhiren/pentest-automation/internal/config"
+	"github.com/dhiren/pentest-automation/internal/db"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/proxy"
 	"github.com/dhiren/pentest-automation/internal/ratelimit"
@@ -49,10 +50,10 @@ func testProxy() *proxy.Proxy {
 
 // testServer creates a fully wired MCP server for testing.
 func testServer() *Server {
-	auditLog := audit.NewLogger(100)
+	store := db.NewMemoryStore(100)
 	ks := &killswitch.Switch{}
 	prx := testProxy()
-	srv := NewServer(prx, auditLog, ks)
+	srv := NewServer(prx, store, ks)
 	srv.SetDeactivationToken("test-token-123")
 	return srv
 }
@@ -481,10 +482,10 @@ func TestCallTool_UnknownFields_Rejected(t *testing.T) {
 // ---------------------------------------------------------------------------
 
 func TestCallTool_AuditLogging(t *testing.T) {
-	auditLog := audit.NewLogger(100)
+	store := db.NewMemoryStore(100)
 	ks := &killswitch.Switch{}
 	prx := testProxy()
-	srv := NewServer(prx, auditLog, ks)
+	srv := NewServer(prx, store, ks)
 
 	// Perform a series of tool calls.
 	_, _ = srv.CallTool("get_scope_status", map[string]interface{}{})
@@ -497,13 +498,13 @@ func TestCallTool_AuditLogging(t *testing.T) {
 	})
 
 	// Check that audit log has entries.
-	entries := auditLog.Search("tool_invocation", "mcp")
+	entries := store.SearchEntries("tool_invocation", "mcp")
 	if len(entries) < 3 {
 		t.Fatalf("expected at least 3 tool_invocation audit entries, got %d", len(entries))
 	}
 
 	// Check kill_switch entry.
-	ksEntries := auditLog.Search("kill_switch", "mcp")
+	ksEntries := store.SearchEntries("kill_switch", "mcp")
 	if len(ksEntries) < 1 {
 		t.Fatalf("expected at least 1 kill_switch audit entry, got %d", len(ksEntries))
 	}

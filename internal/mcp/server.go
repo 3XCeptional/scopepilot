@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
+	"github.com/dhiren/pentest-automation/internal/db"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/proxy"
 )
@@ -63,19 +64,19 @@ var (
 type Server struct {
 	mu                sync.RWMutex
 	prx               *proxy.Proxy
-	audit             *audit.Logger
+	store             db.Store
 	ks                *killswitch.Switch
 	programID         string
 	apiKey            string
 	deactivationToken string
 }
 
-// NewServer creates a new MCP server wrapping the given proxy, audit logger,
+// NewServer creates a new MCP server wrapping the given proxy, data store,
 // and kill switch.
-func NewServer(prx *proxy.Proxy, auditLog *audit.Logger, ks *killswitch.Switch) *Server {
+func NewServer(prx *proxy.Proxy, s db.Store, ks *killswitch.Switch) *Server {
 	return &Server{
 		prx:   prx,
-		audit: auditLog,
+		store: s,
 		ks:    ks,
 	}
 }
@@ -123,7 +124,7 @@ func (s *Server) logToolInvocation(toolName string, params map[string]interface{
 	if result != nil {
 		data["result_type"] = resultTypeName(result)
 	}
-	s.audit.Log("mcp", "tool_invocation", data)
+	s.store.LogEntry("mcp", "tool_invocation", data)
 }
 
 // resultTypeName returns a short type description for structured results.

@@ -12,8 +12,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/dhiren/pentest-automation/internal/audit"
 	"github.com/dhiren/pentest-automation/internal/config"
+	"github.com/dhiren/pentest-automation/internal/db"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/mcp"
 	"github.com/dhiren/pentest-automation/internal/proxy"
@@ -148,9 +148,9 @@ func TestMCPScopeStatus(t *testing.T) {
 	}
 	p := proxy.NewProxy(cfg)
 	p.Switch = &killswitch.Switch{}
-	p.Logger = audit.NewLogger(1000)
+	store := db.NewMemoryStore(1000)
 
-	srv := mcp.NewServer(p, p.Logger, p.Switch)
+	srv := mcp.NewServer(p, store, p.Switch)
 	srv.SetProgramID("integration-test-program")
 
 	// Send list_tools request.
@@ -215,12 +215,12 @@ func TestMCPCheckURL(t *testing.T) {
 	}
 	p := proxy.NewProxy(cfg)
 	p.Switch = &killswitch.Switch{}
-	p.Logger = audit.NewLogger(1000)
+	store := db.NewMemoryStore(1000)
 	p.SetDNSOverride(func(ctx context.Context, host string) ([]string, error) {
 		return []string{"93.184.216.34"}, nil
 	})
 
-	srv := mcp.NewServer(p, p.Logger, p.Switch)
+	srv := mcp.NewServer(p, store, p.Switch)
 	srv.SetProgramID("test")
 
 	// Test in-scope URL.
@@ -276,9 +276,9 @@ func TestMCPCheckURL(t *testing.T) {
 func TestMCPKillSwitch(t *testing.T) {
 	p := proxy.NewProxy(proxy.Config{ProgramID: "test", ActiveTestingEnabled: true})
 	p.Switch = &killswitch.Switch{}
-	p.Logger = audit.NewLogger(1000)
+	store := db.NewMemoryStore(1000)
 
-	srv := mcp.NewServer(p, p.Logger, p.Switch)
+	srv := mcp.NewServer(p, store, p.Switch)
 	srv.SetProgramID("test")
 	srv.SetDeactivationToken("test-token-123")
 
@@ -326,9 +326,9 @@ func TestMCPKillSwitchDeactivationWithWrongToken(t *testing.T) {
 	p := proxy.NewProxy(proxy.Config{ProgramID: "test", ActiveTestingEnabled: true})
 	p.Switch = &killswitch.Switch{}
 	p.Switch.Activate("test")
-	p.Logger = audit.NewLogger(1000)
+	store := db.NewMemoryStore(1000)
 
-	srv := mcp.NewServer(p, p.Logger, p.Switch)
+	srv := mcp.NewServer(p, store, p.Switch)
 	srv.SetProgramID("test")
 	srv.SetDeactivationToken("test-token-123")
 
@@ -369,9 +369,9 @@ func TestMCPKillSwitchDeactivationWithWrongToken(t *testing.T) {
 func TestMCPAuth(t *testing.T) {
 	p := proxy.NewProxy(proxy.Config{ProgramID: "test", ActiveTestingEnabled: true})
 	p.Switch = &killswitch.Switch{}
-	p.Logger = audit.NewLogger(1000)
+	store := db.NewMemoryStore(1000)
 
-	srv := mcp.NewServer(p, p.Logger, p.Switch)
+	srv := mcp.NewServer(p, store, p.Switch)
 	srv.SetProgramID("test")
 	srv.SetAPIKey("secret-key-123")
 

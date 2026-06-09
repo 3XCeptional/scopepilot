@@ -354,9 +354,9 @@ func (s *Server) handleGetAuditLog(params map[string]interface{}) []*audit.Entry
 	}
 
 	if eventType != "" {
-		return s.audit.Search(eventType, "")
+		return s.store.SearchEntries(eventType, "")
 	}
-	return s.audit.Recent(limit)
+	return s.store.RecentEntries(limit)
 }
 
 func (s *Server) handleGetRateLimitStatus() *proxy.RateLimitState {
@@ -372,11 +372,11 @@ func (s *Server) handleActivateKillSwitch(params map[string]interface{}) killswi
 
 	s.ks.Activate(by)
 
-	s.audit.Log("mcp", "kill_switch", map[string]interface{}{
-		"action": "activate",
-		"reason": reason,
-		"by":     by,
-	})
+	s.store.LogEntry("mcp", "kill_switch", map[string]interface{}{
+			"action": "activate",
+			"reason": reason,
+			"by":     by,
+		})
 
 	return s.ks.Status()
 }
@@ -388,7 +388,7 @@ func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) (kill
 	s.mu.RUnlock()
 
 	if token == "" {
-		s.audit.Log("mcp", "kill_switch", map[string]interface{}{
+		s.store.LogEntry("mcp", "kill_switch", map[string]interface{}{
 			"action": "deactivate_denied",
 			"reason": "kill switch deactivation not configured — operator must set SCOPEPILOT_DEACTIVATION_TOKEN",
 		})
@@ -397,7 +397,7 @@ func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) (kill
 
 	callerToken, _ := params["token"].(string)
 	if callerToken != token {
-		s.audit.Log("mcp", "kill_switch", map[string]interface{}{
+		s.store.LogEntry("mcp", "kill_switch", map[string]interface{}{
 			"action": "deactivate_denied",
 			"reason": "invalid deactivation token",
 		})
@@ -406,7 +406,7 @@ func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) (kill
 
 	s.ks.Deactivate()
 
-	s.audit.Log("mcp", "kill_switch", map[string]interface{}{
+	s.store.LogEntry("mcp", "kill_switch", map[string]interface{}{
 		"action": "deactivate",
 	})
 
