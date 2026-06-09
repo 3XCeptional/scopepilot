@@ -95,6 +95,26 @@ test-integration: _require_go
 lint: _require_go
 	go vet ./...
 
+## install-tools — Install BBOT and Nuclei for recon operations
+install-tools:
+	@echo "=== Installing recon tools ==="
+	@if command -v pip3 >/dev/null 2>&1; then \
+		pip3 install bbot --quiet 2>/dev/null && echo "[OK] BBOT installed" || echo "[FAIL] BBOT install failed"; \
+	elif command -v pip >/dev/null 2>&1; then \
+		pip install bbot --quiet 2>/dev/null && echo "[OK] BBOT installed" || echo "[FAIL] BBOT install failed"; \
+	else \
+		echo "[SKIP] pip not found. Install BBOT manually: pip install bbot"; \
+	fi
+	@if command -v go >/dev/null 2>&1; then \
+		go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest 2>/dev/null && echo "[OK] Nuclei installed" || echo "[FAIL] Nuclei install failed"; \
+	else \
+		echo "[SKIP] go not found. Install Nuclei manually: go install github.com/projectdiscovery/nuclei/v3/cmd/nuclei@latest"; \
+	fi
+	@if command -v nuclei >/dev/null 2>&1; then \
+		nuclei -update-templates 2>/dev/null && echo "[OK] Nuclei templates updated"; \
+	fi
+	@echo "=== Done ==="
+
 ## up — Start all services (detached)
 up: _require_compose
 	$(PODMAN_COMPOSE) up -d
