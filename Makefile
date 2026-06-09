@@ -17,7 +17,7 @@
 # ============================================================================
 
 SHELL := /bin/bash
-.PHONY: doctor build test test-unit up down status logs clean remove shell rebuild
+.PHONY: doctor build test test-unit test-integration lint up down status logs clean remove shell rebuild
 
 # --------------------------------------------------------------------------
 # Tool detection
@@ -86,6 +86,14 @@ test: _require_go
 ## test-unit — Run unit tests only (no integration)
 test-unit: _require_go
 	go test -v -short ./internal/...
+
+## test-integration — Run integration tests
+test-integration: _require_go
+	CGO_ENABLED=1 go test -race -v ./test/...
+
+## lint — Run go vet
+lint: _require_go
+	go vet ./...
 
 ## up — Start all services (detached)
 up: _require_compose

@@ -66,6 +66,18 @@ type Proxy struct {
 	mu          sync.RWMutex
 }
 
+// SetDNSOverride replaces the DNS lookup function with a custom one.
+// Used by tests to avoid real DNS lookups. Pass nil to restore default.
+func (p *Proxy) SetDNSOverride(fn func(ctx context.Context, host string) ([]string, error)) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if fn == nil {
+		p.lookupHostFn = net.DefaultResolver.LookupHost
+	} else {
+		p.lookupHostFn = fn
+	}
+}
+
 // NewProxy creates a new Proxy from the given Config.
 func NewProxy(cfg Config) *Proxy {
 	p := &Proxy{
@@ -480,6 +492,14 @@ func RedactResponseHeaders(header http.Header) {
 // ServeHTTP implements http.Handler. It runs every request through all safety
 // layers before deciding to deny, dry-run, or forward.
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	// Health check endpoint — bypasses all safety layers.
+	if r.URL.Path == "/health" {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusOK)
+		w.Write([]byte(`{"status":"ok","program_id":"` + p.ProgramID + `"}`))
+		return
+	}
+
 	// 1. Global kill switch.
 	if p.CheckKillSwitch() {
 		reason := "global kill switch is active"
