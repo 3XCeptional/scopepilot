@@ -1,0 +1,364 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScopePilot Dashboard</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+  * { margin: 0; padding: 0; box-sizing: border-box; }
+  body {
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'Inter', sans-serif;
+    padding: 20px;
+    min-height: 100vh;
+  }
+  .header {
+    display: flex; justify-content: space-between; align-items: center;
+    border-bottom: 1px solid #30363d; padding-bottom: 16px; margin-bottom: 24px;
+  }
+  .header h1 { font-size: 20px; color: #58a6ff; }
+  .header .sub { color: #8b949e; font-size: 12px; margin-top: 2px; }
+  .header .status-badge {
+    padding: 4px 12px; border-radius: 20px; font-size: 12px; font-weight: 600;
+  }
+  .status-badge.online { background: #0d5320; color: #3fb950; border: 1px solid #3fb950; }
+  .status-badge.offline { background: #53200d; color: #f85149; border: 1px solid #f85149; }
+  .grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(240px, 1fr)); gap: 12px; margin-bottom: 24px; }
+  .card {
+    background: #161b22; border: 1px solid #30363d; border-radius: 8px; padding: 16px;
+  }
+  .card .label { font-size: 11px; color: #8b949e; text-transform: uppercase; letter-spacing: .5px; }
+  .card .value { font-size: 28px; font-weight: 700; margin-top: 4px; }
+  .card .value.green { color: #3fb950; }
+  .card .value.red { color: #f85149; }
+  .card .value.yellow { color: #d29922; }
+  .card .value.blue { color: #58a6ff; }
+  .card .value.purple { color: #a371f7; }
+  .section { margin-bottom: 20px; }
+  .section h2 { font-size: 14px; color: #8b949e; margin-bottom: 12px; text-transform: uppercase; letter-spacing: .5px; }
+  .audit-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  .audit-table th { text-align: left; padding: 8px 12px; color: #8b949e; border-bottom: 1px solid #30363d; font-weight: 500; }
+  .audit-table td { padding: 8px 12px; border-bottom: 1px solid #21262d; font-family: 'JetBrains Mono', monospace; font-size: 11px; }
+  .audit-table tr:hover td { background: #1c2128; }
+  button, input, select {
+    font-family: 'Inter', sans-serif; font-size: 13px;
+    padding: 8px 16px; border-radius: 6px; border: 1px solid #30363d;
+    background: #21262d; color: #e6edf3; cursor: pointer;
+  }
+  button:hover { background: #30363d; }
+  button.primary { background: #238636; border-color: #238636; color: #fff; }
+  button.primary:hover { background: #2ea043; }
+  button.danger { background: #da3633; border-color: #da3633; color: #fff; }
+  button.danger:hover { background: #f85149; }
+  button:disabled { opacity: .5; cursor: not-allowed; }
+  input[type=text] { width: 400px; max-width: 100%; cursor: text; }
+  input[type=text]:focus { outline: none; border-color: #58a6ff; }
+  .tool-row { display: flex; gap: 8px; align-items: center; margin-bottom: 8px; flex-wrap: wrap; }
+  .tool-result {
+    background: #0d1117; border: 1px solid #30363d; border-radius: 6px;
+    padding: 12px; font-family: 'JetBrains Mono', monospace; font-size: 12px;
+    white-space: pre-wrap; line-height: 1.5; margin-top: 8px; max-height: 300px; overflow-y: auto;
+  }
+  .tabs { display: flex; gap: 4px; margin-bottom: 16px; border-bottom: 1px solid #30363d; }
+  .tab { padding: 8px 20px; cursor: pointer; border-bottom: 2px solid transparent; color: #8b949e; font-size: 13px; }
+  .tab.active { color: #58a6ff; border-bottom-color: #58a6ff; }
+  .tab:hover { color: #e6edf3; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+  .ks-status { display: inline-flex; align-items: center; gap: 8px; padding: 4px 12px; border-radius: 20px; font-size: 13px; font-weight: 600; }
+  .ks-status.active { background: #53200d; color: #f85149; border: 1px solid #f85149; }
+  .ks-status.inactive { background: #0d5320; color: #3fb950; border: 1px solid #3fb950; }
+  .spinner { display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .toast {
+    position: fixed; bottom: 20px; right: 20px; padding: 12px 20px;
+    border-radius: 8px; font-size: 13px; font-weight: 500; z-index: 100;
+    animation: fadein .3s, fadeout .3s 2.7s;
+  }
+  .toast.ok { background: #0d5320; color: #3fb950; border: 1px solid #3fb950; }
+  .toast.err { background: #53200d; color: #f85149; border: 1px solid #f85149; }
+  @keyframes fadein { from { opacity: 0; transform: translateY(10px); } to { opacity: 1; transform: translateY(0); } }
+  @keyframes fadeout { from { opacity: 1; } to { opacity: 0; } }
+</style>
+</head>
+<body>
+<div class="header">
+  <div>
+    <h1>🛡️ ScopePilot Dashboard</h1>
+    <div class="sub">Operator interface · MCP endpoint: <span id="mcp-url">http://127.0.0.1:9090</span></div>
+  </div>
+  <div>
+    <span class="status-badge" id="conn-status">Checking...</span>
+    <button onclick="refreshAll()" style="margin-left:8px">↻ Refresh</button>
+  </div>
+</div>
+
+<!-- Status Cards -->
+<div class="grid" id="status-cards">
+  <div class="card"><div class="label">Scope Rules</div><div class="value blue" id="scope-count">—</div></div>
+  <div class="card"><div class="label">URLs Checked</div><div class="value" id="urls-checked">0</div></div>
+  <div class="card"><div class="label">Allowed</div><div class="value green" id="urls-allowed">0</div></div>
+  <div class="card"><div class="label">Blocked</div><div class="value red" id="urls-blocked">0</div></div>
+  <div class="card"><div class="label">Kill Switch</div><div class="value" id="ks-status-display">—</div></div>
+  <div class="card"><div class="label">Audit Entries</div><div class="value yellow" id="audit-count">0</div></div>
+</div>
+
+<!-- Tabs -->
+<div class="tabs">
+  <div class="tab active" onclick="switchTab('tools')">🔧 Tools</div>
+  <div class="tab" onclick="switchTab('audit')">📋 Audit Log</div>
+  <div class="tab" onclick="switchTab('killswitch')">☠️ Kill Switch</div>
+  <div class="tab" onclick="switchTab('ratelimit')">⏱️ Rate Limit</div>
+  <div class="tab" onclick="switchTab('scope')">🎯 Scope</div>
+</div>
+
+<!-- Panel: Tools -->
+<div id="panel-tools" class="panel active">
+  <div class="section">
+    <h2>URL Safety Check</h2>
+    <div class="tool-row">
+      <input type="text" id="url-input" placeholder="https://www.example.com/path" value="https://www.example.com/">
+      <button class="primary" onclick="checkURL()">Check URL</button>
+    </div>
+    <div id="url-result" class="tool-result" style="display:none"></div>
+  </div>
+  <div class="section">
+    <h2>Batch URL Validation</h2>
+    <div class="tool-row">
+      <input type="text" id="batch-input" placeholder="URLs (comma-separated)" value="https://www.example.com/,https://evil.com/" style="width:500px">
+      <button class="primary" onclick="batchCheck()">Check All</button>
+    </div>
+    <div id="batch-result" class="tool-result" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Panel: Audit Log -->
+<div id="panel-audit" class="panel">
+  <div class="section">
+    <div class="tool-row">
+      <select id="audit-filter" onchange="loadAuditLog()">
+        <option value="">All events</option>
+        <option value="tool_invocation">Tool invocations</option>
+        <option value="kill_switch">Kill switch</option>
+      </select>
+      <button class="primary" onclick="loadAuditLog()">Load</button>
+    </div>
+    <div id="audit-content"><span class="spinner"></span> Loading...</div>
+  </div>
+</div>
+
+<!-- Panel: Kill Switch -->
+<div id="panel-killswitch" class="panel">
+  <div class="section">
+    <h2>Kill Switch Control</h2>
+    <div class="tool-row">
+      <span id="ks-status" class="ks-status inactive">● INACTIVE</span>
+      <button class="danger" onclick="activateKS()" id="btn-activate-ks">Activate</button>
+      <button onclick="deactivateKS()" id="btn-deactivate-ks">Deactivate</button>
+    </div>
+    <div class="tool-row" style="margin-top:12px">
+      <input type="text" id="ks-reason" placeholder="Reason for activation" style="width:300px">
+    </div>
+    <div class="tool-row">
+      <input type="password" id="ks-token" placeholder="Deactivation token" style="width:300px">
+    </div>
+    <div id="ks-result" class="tool-result" style="display:none"></div>
+  </div>
+</div>
+
+<!-- Panel: Rate Limit -->
+<div id="panel-ratelimit" class="panel">
+  <div class="section">
+    <h2>Rate Limiter Status</h2>
+    <div id="ratelimit-content"><span class="spinner"></span> Loading...</div>
+  </div>
+</div>
+
+<!-- Panel: Scope -->
+<div id="panel-scope" class="panel">
+  <div class="section">
+    <h2>Scope Configuration</h2>
+    <div id="scope-content"><span class="spinner"></span> Loading...</div>
+  </div>
+</div>
+
+<script>
+const MCP = document.getElementById('mcp-url').textContent;
+let urlCount = 0, allowCount = 0, blockCount = 0;
+let auditEntries = 0;
+
+async function mcpCall(method, params) {
+  const resp = await fetch(MCP + '/mcp', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({jsonrpc:'2.0', method:'call_tool',
+      params:{name:method, arguments:params||{}}, id:1})
+  });
+  return await resp.json();
+}
+
+function showToast(msg, type='ok') {
+  const t = document.createElement('div'); t.className = 'toast ' + type;
+  t.textContent = msg; document.body.appendChild(t);
+  setTimeout(() => t.remove(), 3000);
+}
+
+function updateCard(id, val, cls) {
+  const el = document.getElementById(id);
+  if (el) { el.textContent = val; if (cls) el.className = 'value ' + cls; }
+}
+
+function switchTab(name) {
+  document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(p => p.classList.remove('active'));
+  document.querySelector(`.tab[onclick*="${name}"]`).classList.add('active');
+  document.getElementById('panel-' + name).classList.add('active');
+}
+
+// ---- Tools ----
+async function checkURL() {
+  const url = document.getElementById('url-input').value.trim();
+  if (!url) return;
+  const el = document.getElementById('url-result');
+  el.style.display = 'block'; el.innerHTML = '<span class="spinner"></span> Checking...';
+  const resp = await mcpCall('check_url', {url});
+  const r = resp.result || {};
+  const ok = r.allowed;
+  el.innerHTML = `<strong>${ok ? '✅ ALLOWED' : '❌ BLOCKED'}</strong>\n` +
+    `URL:    ${r.url || url}\n` +
+    `Reason: ${r.reason || 'N/A'}\n` +
+    `Blocked IP: ${r.blocked_ip || false}\n` +
+    `Denied scheme: ${r.denied_scheme || false}\n` +
+    `Rate limited: ${r.rate_limited || false}`;
+  el.style.borderColor = ok ? '#3fb950' : '#f85149';
+  urlCount++; allowCount += ok ? 1 : 0; blockCount += ok ? 0 : 1;
+  updateCard('urls-checked', urlCount); updateCard('urls-allowed', allowCount, 'green'); updateCard('urls-blocked', blockCount, 'red');
+}
+
+async function batchCheck() {
+  const raw = document.getElementById('batch-input').value;
+  const urls = raw.split(',').map(s => s.trim()).filter(Boolean);
+  if (!urls.length) return;
+  const el = document.getElementById('batch-result');
+  el.style.display = 'block'; el.innerHTML = '<span class="spinner"></span> Checking ' + urls.length + ' URLs...';
+  const resp = await mcpCall('run_safe_check', {urls});
+  const results = (resp.result || {}).results || [];
+  let html = '';
+  for (const r of results) {
+    const ok = r.allowed;
+    html += `${ok ? '✅' : '❌'} ${r.url} — ${r.reason || (ok ? 'allowed' : 'blocked')}\n`;
+    urlCount++; allowCount += ok ? 1 : 0; blockCount += ok ? 0 : 1;
+  }
+  el.innerHTML = `<strong>${results.length} URLs checked</strong>\n${html}`;
+  updateCard('urls-checked', urlCount); updateCard('urls-allowed', allowCount, 'green'); updateCard('urls-blocked', blockCount, 'red');
+}
+
+// ---- Audit ----
+async function loadAuditLog() {
+  const filter = document.getElementById('audit-filter').value;
+  const el = document.getElementById('audit-content');
+  el.innerHTML = '<span class="spinner"></span> Loading...';
+  const params = {limit: 50};
+  if (filter) params.event_type = filter;
+  const resp = await mcpCall('get_audit_log', params);
+  const entries = resp.result || [];
+  auditEntries = entries.length;
+  updateCard('audit-count', auditEntries, 'yellow');
+  if (!entries.length) { el.innerHTML = '<em>No entries found</em>'; return; }
+  let html = '<table class="audit-table"><tr><th>Time</th><th>Event</th><th>Details</th></tr>';
+  for (const e of entries.slice(0, 50)) {
+    const ts = (e.timestamp || '').substring(0, 19);
+    const tool = (e.data || {}).tool || e.event_type;
+    const detail = e.data ? JSON.stringify(e.data).substring(0, 80) : '';
+    html += `<tr><td>${ts}</td><td>${e.event_type}</td><td>${detail}</td></tr>`;
+  }
+  html += '</table>';
+  el.innerHTML = html;
+}
+
+// ---- Kill Switch ----
+async function loadKS() {
+  const resp = await mcpCall('is_kill_switch_active');
+  const active = (resp.result || {}).active;
+  const el = document.getElementById('ks-status');
+  el.className = 'ks-status ' + (active ? 'active' : 'inactive');
+  el.innerHTML = active ? '● ACTIVE' : '● INACTIVE';
+  updateCard('ks-status-display', active ? 'ACTIVE' : 'INACTIVE', active ? 'red' : 'green');
+  document.getElementById('btn-activate-ks').disabled = active;
+  document.getElementById('btn-deactivate-ks').disabled = !active;
+}
+
+async function activateKS() {
+  const reason = document.getElementById('ks-reason').value || 'dashboard';
+  const resp = await mcpCall('activate_kill_switch', {reason});
+  const el = document.getElementById('ks-result');
+  el.style.display = 'block';
+  const r = resp.result || {};
+  el.innerHTML = `Kill switch activated at ${r.activated_at || '?'} by ${r.activated_by || '?'}`;
+  showToast('🔴 Kill switch activated', 'err');
+  await loadKS();
+}
+
+async function deactivateKS() {
+  const token = document.getElementById('ks-token').value;
+  if (!token) { showToast('Enter deactivation token', 'err'); return; }
+  const resp = await mcpCall('deactivate_kill_switch', {token});
+  const el = document.getElementById('ks-result');
+  el.style.display = 'block';
+  if (resp.error) {
+    el.innerHTML = '❌ ' + (resp.error.message || 'Deactivation failed');
+    showToast('❌ ' + (resp.error.message || 'Failed'), 'err');
+  } else {
+    el.innerHTML = '✅ Kill switch deactivated';
+    showToast('✅ Kill switch deactivated', 'ok');
+  }
+  await loadKS();
+}
+
+// ---- Rate Limit ----
+async function loadRateLimit() {
+  const el = document.getElementById('ratelimit-content');
+  const resp = await mcpCall('get_ratelimit_status');
+  const r = resp.result || {};
+  el.innerHTML = '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+}
+
+// ---- Scope ----
+async function loadScope() {
+  const el = document.getElementById('scope-content');
+  const resp = await mcpCall('get_scope_status');
+  const r = resp.result || {};
+  updateCard('scope-count', (r.include_count||0) + ' rules', 'blue');
+  el.innerHTML = '<pre>' + JSON.stringify(r, null, 2) + '</pre>';
+}
+
+// ---- Connection ----
+async function checkConnection() {
+  const badge = document.getElementById('conn-status');
+  try {
+    const resp = await mcpCall('is_kill_switch_active');
+    badge.className = 'status-badge online';
+    badge.textContent = '● Online';
+    return true;
+  } catch (e) {
+    badge.className = 'status-badge offline';
+    badge.textContent = '● Offline';
+    return false;
+  }
+}
+
+async function refreshAll() {
+  if (!await checkConnection()) { showToast('Cannot connect to MCP server', 'err'); return; }
+  await Promise.all([loadKS(), loadScope(), loadRateLimit()]);
+  // Load audit log for the active tab
+  const active = document.querySelector('.panel.active');
+  if (active && active.id === 'panel-audit') loadAuditLog();
+}
+
+// Init
+document.addEventListener('DOMContentLoaded', refreshAll);
+</script>
+</body>
+</html>

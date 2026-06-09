@@ -9,6 +9,7 @@
 package mcp
 
 import (
+	"embed"
 	"encoding/json"
 	"log"
 	"net/http"
@@ -19,6 +20,23 @@ import (
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/proxy"
 )
+
+//go:embed dashboard/index.html
+var dashboardFiles embed.FS
+
+// Dashboard returns the operator dashboard HTML page.
+func (s *Server) Dashboard() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		data, err := dashboardFiles.ReadFile("dashboard/index.html")
+		if err != nil {
+			http.Error(w, "dashboard not found", http.StatusInternalServerError)
+			return
+		}
+		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.WriteHeader(http.StatusOK)
+		w.Write(data)
+	})
+}
 
 // ToolDef describes a single callable tool with typed JSON Schema input/output.
 type ToolDef struct {
