@@ -169,6 +169,7 @@ type BBOTConfig struct {
 	MCPClient  *MCPClient
 	DryRun     bool // If true, only check scope, don't execute BBOT
 	Timeout    time.Duration
+	ProxyURL   string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
 }
 
 // NucleiConfig holds configuration for the Nuclei adapter.
@@ -178,6 +179,7 @@ type NucleiConfig struct {
 	DryRun      bool
 	Timeout     time.Duration
 	TemplateDir string // Path to nuclei templates
+	ProxyURL    string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
 }
 
 // BBOTResult holds structured results from a BBOT scan.
@@ -253,6 +255,10 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 		"-o", "json",
 	}
 
+	if cfg.ProxyURL != "" {
+		args = append(args, "--proxy", cfg.ProxyURL)
+	}
+
 	cmd := exec.CommandContext(ctx, cfg.BinaryPath, args...)
 
 	output, err := cmd.CombinedOutput()
@@ -318,6 +324,10 @@ func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*Nuclei
 		"--no-httpx",
 		"--bulk-size", "5",
 		"--concurrency", "2",
+	}
+
+	if cfg.ProxyURL != "" {
+		args = append(args, "-proxy", cfg.ProxyURL)
 	}
 
 	cmd := exec.CommandContext(ctx, cfg.BinaryPath, args...)

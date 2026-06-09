@@ -61,12 +61,13 @@ var (
 
 // Server is a JSON-RPC 2.0 server that exposes ScopePilot tools.
 type Server struct {
-	mu        sync.RWMutex
-	prx       *proxy.Proxy
-	audit     *audit.Logger
-	ks        *killswitch.Switch
-	programID string
-	apiKey    string
+	mu                sync.RWMutex
+	prx               *proxy.Proxy
+	audit             *audit.Logger
+	ks                *killswitch.Switch
+	programID         string
+	apiKey            string
+	deactivationToken string
 }
 
 // NewServer creates a new MCP server wrapping the given proxy, audit logger,
@@ -87,12 +88,20 @@ func (s *Server) SetProgramID(id string) {
 }
 
 // SetAPIKey sets an optional API key for bearer-token authentication.
-// If set, all incoming requests must include an Authorization: Bearer <key>
+// If set, all incoming requests must include an Authorization: Bearer ***
 // header. If empty, authentication is skipped (local dev mode).
 func (s *Server) SetAPIKey(key string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.apiKey = key
+}
+
+// SetDeactivationToken sets the required token for deactivating the kill switch.
+// If empty, deactivation is always denied.
+func (s *Server) SetDeactivationToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.deactivationToken = token
 }
 
 // programID gets the current program ID.

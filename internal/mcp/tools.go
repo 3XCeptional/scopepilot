@@ -131,17 +131,16 @@ func (s *Server) ListTools() []ToolDef {
 		},
 		{
 			Name:        "deactivate_kill_switch",
-			Description: "Deactivates the kill switch, allowing testing activity to resume. Requires operator-level authorization.",
+			Description: "Deactivates the kill switch, allowing testing activity to resume. Requires a secret deactivation token.",
 			InputSchema: map[string]interface{}{
 				"type": "object",
 				"properties": map[string]interface{}{
-					"level": map[string]interface{}{
+					"token": map[string]interface{}{
 						"type":        "string",
-						"description": "Authorization level (default: 'operator'). Set to 'agent' to test that agent-level deactivation is denied.",
-						"default":     "operator",
+						"description": "The secret deactivation token defined by SCOPEPILOT_DEACTIVATION_TOKEN.",
 					},
 				},
-				"required":             []string{},
+				"required":             []string{"token"},
 				"additionalProperties": false,
 			},
 			OutputSchema: map[string]interface{}{
@@ -304,7 +303,7 @@ func (s *Server) CallTool(name string, params map[string]interface{}) (interface
 		result = s.handleActivateKillSwitch(params)
 
 	case "deactivate_kill_switch":
-		result = s.handleDeactivateKillSwitch(params)
+		result, err = s.handleDeactivateKillSwitch(params)
 
 	case "is_kill_switch_active":
 		result = s.handleIsKillSwitchActive()
@@ -382,23 +381,27 @@ func (s *Server) handleActivateKillSwitch(params map[string]interface{}) killswi
 	return s.ks.Status()
 }
 
-func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) killswitch.KillSwitchStatus {
-	// Default level is "operator"; only operator-level callers may deactivate.
-	level, _ := params["level"].(string)
-	if level == "" {
-		level = "operator"
-	}
-	if level != "operator" {
+func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) (killswitch.KillSwitchStatus, error) {
+	// Read the deactivation token under lock.
+	s.mu.RLock()
+	token := s.deactivationToken
+	s.mu.RUnlock()
+
+	if token == "" {
 		s.audit.Log("mcp", "kill_switch", map[string]interface{}{
 			"action": "deactivate_denied",
-			"level":  level,
-			"reason": "kill switch deactivation requires operator-level authorization",
+			"reason": "kill switch deactivation not configured — operator must set SCOPEPILOT_DEACTIVATION_TOKEN",
 		})
-		return killswitch.KillSwitchStatus{
-			Active:      true,
-			ActivatedAt: "",
-			ActivatedBy: "",
-		}
+		return killswitch.KillSwitchStatus{}, fmt.Errorf("kill switch deactivation not configured — operator must set SCOPEPILOT_DEACTIVATION_TOKEN")
+	}
+
+	callerToken, _ := params["token"].(string)
+	if callerToken != token {
+		s.audit.Log("mcp", "kill_switch", map[string]interface{}{
+			"action": "deactivate_denied",
+			"reason": "invalid deactivation token",
+		})
+		return killswitch.KillSwitchStatus{}, fmt.Errorf("invalid deactivation token")
 	}
 
 	s.ks.Deactivate()
@@ -407,7 +410,7 @@ func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) kills
 		"action": "deactivate",
 	})
 
-	return s.ks.Status()
+	return s.ks.Status(), nil
 }
 
 func (s *Server) handleIsKillSwitchActive() map[string]interface{} {

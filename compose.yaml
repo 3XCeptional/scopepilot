@@ -32,7 +32,7 @@ services:
     networks:
       - scopepilot-net
     volumes:
-      - scopepilot-config:/etc/scopepilot:ro
+      - ./config:/etc/scopepilot:ro
     read_only: true
     cap_drop:
       - ALL
@@ -45,7 +45,7 @@ services:
           cpus: "0.5"
           memory: 256M
     healthcheck:
-      test: ["CMD-SHELL", "wget --no-verbose --tries=1 --spider http://localhost:9090/mcp 2>/dev/null || exit 1"]
+      test: ["CMD", "/scopepilot", "health"]
       interval: 30s
       timeout: 5s
       retries: 3
@@ -86,6 +86,4 @@ networks:
     internal: true
     name: scopepilot-net
 
-volumes:
-  scopepilot-config:
-    name: scopepilot-config
+volumes: {}

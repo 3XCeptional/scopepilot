@@ -52,7 +52,9 @@ func testServer() *Server {
 	auditLog := audit.NewLogger(100)
 	ks := &killswitch.Switch{}
 	prx := testProxy()
-	return NewServer(prx, auditLog, ks)
+	srv := NewServer(prx, auditLog, ks)
+	srv.SetDeactivationToken("test-token-123")
+	return srv
 }
 
 // ---------------------------------------------------------------------------
@@ -391,7 +393,9 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 	}
 
 	// Deactivate.
-	result, err = srv.CallTool("deactivate_kill_switch", map[string]interface{}{})
+	result, err = srv.CallTool("deactivate_kill_switch", map[string]interface{}{
+		"token": "test-token-123",
+	})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

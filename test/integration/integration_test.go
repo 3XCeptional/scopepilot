@@ -12,20 +12,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/dhiren/pentest-automation/internal/audit"
 	"github.com/dhiren/pentest-automation/internal/config"
+	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/mcp"
 	"github.com/dhiren/pentest-automation/internal/proxy"
-	"github.com/dhiren/pentest-automation/internal/killswitch"
-	"github.com/dhiren/pentest-automation/internal/audit"
 )
 
 // TestProxyHealthCheck verifies the /health endpoint bypasses all safety layers.
 func TestProxyHealthCheck(t *testing.T) {
 	cfg := proxy.Config{
-		ProgramID:             "test-program",
-		ActiveTestingEnabled:  true,
-		AllowedSchemes:        []string{"https"},
-		AllowedPorts:          []int{443},
+		ProgramID:            "test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
 		ScopeCfg: config.ScopeConfig{
 			Include: []config.ScopeRule{
 				{Type: "exact_host", Value: "app.example.com"},
@@ -73,10 +73,10 @@ func TestProxyHealthCheckDuringKillSwitch(t *testing.T) {
 // TestProxyScopeDeny verifies out-of-scope requests are denied.
 func TestProxyScopeDeny(t *testing.T) {
 	cfg := proxy.Config{
-		ProgramID:             "test-program",
-		ActiveTestingEnabled:  true,
-		AllowedSchemes:        []string{"https"},
-		AllowedPorts:          []int{443},
+		ProgramID:            "test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
 		ScopeCfg: config.ScopeConfig{
 			Include: []config.ScopeRule{
 				{Type: "exact_host", Value: "app.example.com"},
@@ -101,10 +101,10 @@ func TestProxyScopeDeny(t *testing.T) {
 // TestProxyKillSwitchBlocksRequest verifies kill switch blocks all forwarding.
 func TestProxyKillSwitchBlocksRequest(t *testing.T) {
 	cfg := proxy.Config{
-		ProgramID:             "test-program",
-		ActiveTestingEnabled:  true,
-		AllowedSchemes:        []string{"https"},
-		AllowedPorts:          []int{443},
+		ProgramID:            "test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
 		ScopeCfg: config.ScopeConfig{
 			Include: []config.ScopeRule{
 				{Type: "wildcard_host", Value: "*.example.com"},
@@ -132,10 +132,10 @@ func TestProxyKillSwitchBlocksRequest(t *testing.T) {
 // TestMCPScopeStatus verifies the MCP get_scope_status tool.
 func TestMCPScopeStatus(t *testing.T) {
 	cfg := proxy.Config{
-		ProgramID:             "integration-test-program",
-		ActiveTestingEnabled:  true,
-		AllowedSchemes:        []string{"https"},
-		AllowedPorts:          []int{443},
+		ProgramID:            "integration-test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
 		ScopeCfg: config.ScopeConfig{
 			Include: []config.ScopeRule{
 				{Type: "exact_host", Value: "app.example.com"},
@@ -181,11 +181,11 @@ func TestMCPScopeStatus(t *testing.T) {
 	}
 
 	var status struct {
-		ProgramID      string `json:"program_id"`
-		IncludeCount   int    `json:"include_count"`
-		ExcludeCount   int    `json:"exclude_count"`
+		ProgramID      string   `json:"program_id"`
+		IncludeCount   int      `json:"include_count"`
+		ExcludeCount   int      `json:"exclude_count"`
 		AllowedSchemes []string `json:"allowed_schemes"`
-		AllowedPorts   []int  `json:"allowed_ports"`
+		AllowedPorts   []int    `json:"allowed_ports"`
 	}
 	json.Unmarshal(mcpResp.Result, &status)
 
@@ -203,10 +203,10 @@ func TestMCPScopeStatus(t *testing.T) {
 // TestMCPCheckURL verifies the MCP check_url tool.
 func TestMCPCheckURL(t *testing.T) {
 	cfg := proxy.Config{
-		ProgramID:             "test",
-		ActiveTestingEnabled:  true,
-		AllowedSchemes:        []string{"https"},
-		AllowedPorts:          []int{443},
+		ProgramID:            "test",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
 		ScopeCfg: config.ScopeConfig{
 			Include: []config.ScopeRule{
 				{Type: "wildcard_host", Value: "*.example.com"},
@@ -236,7 +236,7 @@ func TestMCPCheckURL(t *testing.T) {
 	var mcpResp struct {
 		Result json.RawMessage `json:"result"`
 		Error  *struct {
-			Code int    `json:"code"`
+			Code    int    `json:"code"`
 			Message string `json:"message"`
 		} `json:"error,omitempty"`
 	}
@@ -280,6 +280,7 @@ func TestMCPKillSwitch(t *testing.T) {
 
 	srv := mcp.NewServer(p, p.Logger, p.Switch)
 	srv.SetProgramID("test")
+	srv.SetDeactivationToken("test-token-123")
 
 	// Activate via MCP.
 	reqBody := fmt.Sprintf(`{"jsonrpc":"2.0","method":"call_tool","params":{"name":"activate_kill_switch","arguments":{"reason":"%s"}},"id":1}`, "integration test")
@@ -306,7 +307,7 @@ func TestMCPKillSwitch(t *testing.T) {
 	}
 
 	// Deactivate via MCP.
-	reqBody2 := `{"jsonrpc":"2.0","method":"call_tool","params":{"name":"deactivate_kill_switch","arguments":{"level":"operator"}},"id":2}`
+	reqBody2 := `{"jsonrpc":"2.0","method":"call_tool","params":{"name":"deactivate_kill_switch","arguments":{"token":"test-token-123"}},"id":2}`
 	req2 := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody2))
 	req2.Header.Set("Content-Type", "application/json")
 	w2 := httptest.NewRecorder()
@@ -320,8 +321,8 @@ func TestMCPKillSwitch(t *testing.T) {
 	}
 }
 
-// TestMCPKillSwitchDeactivationWithoutOperatorLevel verifies deactivation requires operator.
-func TestMCPKillSwitchDeactivationWithAgentLevel(t *testing.T) {
+// TestMCPKillSwitchDeactivationWithWrongToken verifies deactivation requires correct token.
+func TestMCPKillSwitchDeactivationWithWrongToken(t *testing.T) {
 	p := proxy.NewProxy(proxy.Config{ProgramID: "test", ActiveTestingEnabled: true})
 	p.Switch = &killswitch.Switch{}
 	p.Switch.Activate("test")
@@ -329,9 +330,10 @@ func TestMCPKillSwitchDeactivationWithAgentLevel(t *testing.T) {
 
 	srv := mcp.NewServer(p, p.Logger, p.Switch)
 	srv.SetProgramID("test")
+	srv.SetDeactivationToken("test-token-123")
 
-	// Try to deactivate with agent level.
-	reqBody := `{"jsonrpc":"2.0","method":"call_tool","params":{"name":"deactivate_kill_switch","arguments":{"level":"agent"}},"id":1}`
+	// Try to deactivate with wrong token.
+	reqBody := `{"jsonrpc":"2.0","method":"call_tool","params":{"name":"deactivate_kill_switch","arguments":{"token":"wrong-token"}},"id":1}`
 	req := httptest.NewRequest(http.MethodPost, "/mcp", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	w := httptest.NewRecorder()
@@ -349,19 +351,15 @@ func TestMCPKillSwitchDeactivationWithAgentLevel(t *testing.T) {
 	}
 	json.NewDecoder(resp.Body).Decode(&mcpResp)
 
-	// The handler returns a KillSwitchStatus with Active:true rather than an error.
-	if mcpResp.Error != nil {
-		t.Errorf("unexpected error: %s", mcpResp.Error.Message)
+	// The handler returns a JSON-RPC error for wrong token.
+	if mcpResp.Error == nil {
+		t.Fatal("expected error for wrong deactivation token")
+	}
+	if !strings.Contains(mcpResp.Error.Message, "token") {
+		t.Errorf("expected error about token, got: %s", mcpResp.Error.Message)
 	}
 
-	var status struct {
-		Active bool `json:"active"`
-	}
-	json.Unmarshal(mcpResp.Result, &status)
-
-	if !status.Active {
-		t.Error("kill switch should still be active after failed deactivation attempt")
-	}
+	// Kill switch should still be active after failed deactivation.
 	if !p.Switch.IsActive() {
 		t.Error("kill switch should still be active after failed deactivation attempt")
 	}
