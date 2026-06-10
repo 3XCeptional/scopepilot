@@ -30,7 +30,7 @@ programs:
   - id: scopepilot-dev
     name: ScopePilot Development
     authorization_reference: "https://example.com/policy"
-    active_testing_enabled: false
+    active_testing_enabled: true
     network_policy:
       vpn: prohibited
       stable_source_ip_required: false
@@ -49,16 +49,21 @@ programs:
       max_crawl_depth: 3
     scope:
       include:
+        # Resolvable in-scope seed so `pentest discover --program scopepilot-dev`
+        # works out of the box (example.com resolves and matches this exact rule).
+        - type: exact_host
+          value: example.com
+        # Wildcard for realism — matches sub-domains only, not the apex. It does
+        # not seed discovery on its own (see extractTargets); the exact_host above
+        # is the BBOT enumeration seed.
         - type: wildcard_host
           value: "*.example.com"
-        - type: exact_host
-          value: app.example.com
       exclude:
         - type: path_prefix
-          host: app.example.com
+          host: example.com
           value: /admin
         - type: path_prefix
-          host: app.example.com
+          host: example.com
           value: /logout
     restrictions:
       automated_scanning: permitted

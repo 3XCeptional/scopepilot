@@ -9,16 +9,20 @@
 package mcp
 
 import (
+	"context"
+	"crypto/subtle"
 	"embed"
 	"encoding/json"
 	"log"
 	"net/http"
+	"strings"
 	"sync"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
 	"github.com/dhiren/pentest-automation/internal/db"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/proxy"
+	"github.com/dhiren/pentest-automation/internal/specialist"
 )
 
 //go:embed dashboard/index.html
@@ -32,9 +36,17 @@ func (s *Server) Dashboard() http.Handler {
 			http.Error(w, "dashboard not found", http.StatusInternalServerError)
 			return
 		}
+
+		w.Header().Set("Cache-Control", "no-store")
 		w.Header().Set("Content-Type", "text/html; charset=utf-8")
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Referrer-Policy", "no-referrer")
+		w.Header().Set("Permissions-Policy", "camera=(), microphone=(), geolocation=()")
 		w.WriteHeader(http.StatusOK)
-		w.Write(data)
+		if _, err := w.Write(data); err != nil {
+			log.Printf("[mcp] dashboard write error: %v", err)
+		}
 	})
 }
 
@@ -87,6 +99,9 @@ type Server struct {
 	programID         string
 	apiKey            string
 	deactivationToken string
+	specialistConfig  specialist.Config
+	specialists       map[string]specialist.Specialist
+	gateApprovalToken string
 }
 
 // NewServer creates a new MCP server wrapping the given proxy, data store,
@@ -123,6 +138,26 @@ func (s *Server) SetDeactivationToken(token string) {
 	s.deactivationToken = token
 }
 
+// ConfigureSpecialists registers the bounded specialist MCP tools.
+func (s *Server) ConfigureSpecialists(cfg specialist.Config) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.specialistConfig = cfg
+	s.specialists = map[string]specialist.Specialist{
+		"run_recon_specialist": specialist.NewRecon(),
+		"run_vuln_specialist":  specialist.NewVuln(),
+		"run_gate_specialist":  specialist.NewGate(),
+	}
+}
+
+// SetGateApprovalToken sets the separate operator approval token required
+// before the Gate specialist may run.
+func (s *Server) SetGateApprovalToken(token string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.gateApprovalToken = token
+}
+
 // programID gets the current program ID.
 func (s *Server) getProgramID() string {
 	s.mu.RLock()
@@ -134,7 +169,7 @@ func (s *Server) getProgramID() string {
 func (s *Server) logToolInvocation(toolName string, params map[string]interface{}, result interface{}, err error) {
 	data := map[string]interface{}{
 		"tool":   toolName,
-		"params": params,
+		"params": redactSensitiveMap(params),
 	}
 	if err != nil {
 		data["error"] = err.Error()
@@ -143,6 +178,52 @@ func (s *Server) logToolInvocation(toolName string, params map[string]interface{
 		data["result_type"] = resultTypeName(result)
 	}
 	s.store.LogEntry("mcp", "tool_invocation", data)
+}
+
+func redactSensitiveMap(input map[string]interface{}) map[string]interface{} {
+	if input == nil {
+		return nil
+	}
+	output := make(map[string]interface{}, len(input))
+	for key, value := range input {
+		if isSensitiveKey(key) {
+			output[key] = "[REDACTED]"
+			continue
+		}
+		switch nested := value.(type) {
+		case map[string]interface{}:
+			output[key] = redactSensitiveMap(nested)
+		case []interface{}:
+			items := make([]interface{}, len(nested))
+			for i, item := range nested {
+				if child, ok := item.(map[string]interface{}); ok {
+					items[i] = redactSensitiveMap(child)
+				} else {
+					items[i] = item
+				}
+			}
+			output[key] = items
+		default:
+			output[key] = value
+		}
+	}
+	return output
+}
+
+func isSensitiveKey(key string) bool {
+	switch strings.ToLower(key) {
+	case "token", "approval_token", "api_key", "password", "secret", "authorization":
+		return true
+	default:
+		return false
+	}
+}
+
+func secureEqual(actual, expected string) bool {
+	if actual == "" || expected == "" {
+		return false
+	}
+	return subtle.ConstantTimeCompare([]byte(actual), []byte(expected)) == 1
 }
 
 // resultTypeName returns a short type description for structured results.
@@ -164,6 +245,8 @@ func resultTypeName(result interface{}) string {
 		return "boolean"
 	case []*audit.Entry:
 		return "audit_entries"
+	case *specialist.Result:
+		return "specialist_result"
 	default:
 		return "unknown"
 	}
@@ -196,7 +279,8 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	s.mu.RUnlock()
 	if key != "" {
 		auth := r.Header.Get("Authorization")
-		if auth != "Bearer "+key {
+		const prefix = "Bearer "
+		if len(auth) <= len(prefix) || auth[:len(prefix)] != prefix || !secureEqual(auth[len(prefix):], key) {
 			s.writeJSON(w, http.StatusUnauthorized, jsonrpcResponse{
 				JSONRPC: "2.0",
 				Error:   &rpcError{Code: -32001, Message: "unauthorized"},
@@ -206,6 +290,7 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	r.Body = http.MaxBytesReader(w, r.Body, 1<<20)
 	var req jsonrpcRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		s.writeJSON(w, http.StatusBadRequest, jsonrpcResponse{
@@ -228,15 +313,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Handle the method.
 	var resp jsonrpcResponse
 
+	// callTool dispatches a tool by name + arguments and builds the response.
+	callTool := func(toolName string, toolParams map[string]interface{}) jsonrpcResponse {
+		if toolParams == nil {
+			toolParams = map[string]interface{}{}
+		}
+		result, err := s.CallToolContext(r.Context(), toolName, toolParams)
+		if err != nil {
+			return jsonrpcResponse{JSONRPC: "2.0", Error: &rpcError{Code: -32602, Message: err.Error()}, ID: req.ID}
+		}
+		return jsonrpcResponse{JSONRPC: "2.0", Result: result, ID: req.ID}
+	}
+
 	switch req.Method {
-	case "list_tools":
+	// Accept both the legacy names (list_tools/call_tool) and the standard
+	// MCP names (tools/list, tools/call) so clients written against either
+	// convention work without guessing.
+	case "list_tools", "tools/list":
 		resp = jsonrpcResponse{
 			JSONRPC: "2.0",
 			Result:  s.ListTools(),
 			ID:      req.ID,
 		}
 
-	case "call_tool":
+	case "call_tool", "tools/call":
 		if req.Params == nil {
 			resp = jsonrpcResponse{
 				JSONRPC: "2.0",
@@ -248,37 +348,30 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 		toolName, _ := req.Params["name"].(string)
 		toolParams, _ := req.Params["arguments"].(map[string]interface{})
-		if toolParams == nil {
-			toolParams = map[string]interface{}{}
-		}
+		resp = callTool(toolName, toolParams)
 
-		result, err := s.CallTool(toolName, toolParams)
-		if err != nil {
-			resp = jsonrpcResponse{
-				JSONRPC: "2.0",
-				Error: &rpcError{
-					Code:    -32602,
-					Message: err.Error(),
-				},
-				ID: req.ID,
-			}
+	default:
+		// Convenience: allow invoking a tool by using its name directly as the
+		// JSON-RPC method (e.g. {"method":"get_scope_status"}). list_tools
+		// advertises these names, so calling them directly is the obvious
+		// thing to try — make it work instead of returning "Method not found".
+		if s.isKnownTool(req.Method) {
+			resp = callTool(req.Method, req.Params)
 		} else {
 			resp = jsonrpcResponse{
 				JSONRPC: "2.0",
-				Result:  result,
+				Error:   errMethodNotFound,
 				ID:      req.ID,
 			}
-		}
-
-	default:
-		resp = jsonrpcResponse{
-			JSONRPC: "2.0",
-			Error:   errMethodNotFound,
-			ID:      req.ID,
 		}
 	}
 
 	s.writeJSON(w, http.StatusOK, resp)
+}
+
+// CallToolContext invokes a tool with cancellation inherited from the caller.
+func (s *Server) CallToolContext(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
+	return s.callTool(ctx, name, params)
 }
 
 // writeJSON is a small helper to write a JSON response.

@@ -281,3 +281,46 @@ func TestGlobalVPNValidation(t *testing.T) {
 		})
 	}
 }
+
+func TestConfigVPNPolicyMatchesGlobalRouting(t *testing.T) {
+	baseProgram := ProgramConfig{
+		ID:               "vpn-test",
+		AuthorizationRef: "policy",
+		NetworkPolicy:    NetworkPolicyConfig{VPN: "permitted"},
+		Limits: LimitsConfig{
+			RequestsPerSecondPerHost: 1,
+			MaxConcurrency:           1,
+			MaxResponseBytes:         1024,
+		},
+		Scope: ScopeConfig{Include: []ScopeRule{{Type: "exact_host", Value: "example.com"}}},
+	}
+	defaults := DefaultsConfig{
+		RequestsPerSecondPerHost: 1,
+		MaxConcurrency:           1,
+		MaxResponseBytes:         1024,
+	}
+
+	t.Run("required VPN rejects disabled global VPN", func(t *testing.T) {
+		program := baseProgram
+		program.NetworkPolicy.VPN = "required"
+		cfg := Config{Programs: []ProgramConfig{program}, Global: GlobalConfig{Defaults: defaults}}
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("expected required VPN validation error")
+		}
+	})
+
+	t.Run("prohibited VPN rejects enabled global VPN", func(t *testing.T) {
+		program := baseProgram
+		program.NetworkPolicy.VPN = "prohibited"
+		cfg := Config{
+			Programs: []ProgramConfig{program},
+			Global: GlobalConfig{
+				Defaults: defaults,
+				VPN:      GlobalVPNConfig{Enabled: true, WGConfigPath: "/tmp/wg0.conf"},
+			},
+		}
+		if err := cfg.Validate(); err == nil {
+			t.Fatal("expected prohibited VPN validation error")
+		}
+	})
+}

@@ -57,8 +57,8 @@ type AuditConfig struct {
 // DatabaseConfig controls PostgreSQL connection (optional).
 type DatabaseConfig struct {
 	ConnString string `yaml:"connection_string" json:"connection_string"` // PostgreSQL connection URI
-	Enabled    bool   `yaml:"enabled" json:"enabled"`                    // Enable PostgreSQL storage
-	MaxConns   int32  `yaml:"max_connections" json:"max_connections"`    // Max pool connections (default: 10)
+	Enabled    bool   `yaml:"enabled" json:"enabled"`                     // Enable PostgreSQL storage
+	MaxConns   int32  `yaml:"max_connections" json:"max_connections"`     // Max pool connections (default: 10)
 }
 
 // GlobalVPNConfig is the global VPN policy for worker container egress.
@@ -66,14 +66,14 @@ type DatabaseConfig struct {
 // and worker containers share its network namespace (--network container:)
 // for VPN-routed egress. Management interfaces stay on the host network.
 type GlobalVPNConfig struct {
-	Enabled         bool   `yaml:"enabled" json:"enabled"`               // Enable VPN gateway
-	Country         string `yaml:"country" json:"country"`               // Preferred VPN server country
-	Server          string `yaml:"server" json:"server"`                 // Specific VPN server name
-	WGConfigPath    string `yaml:"wg_config_path" json:"wg_config_path"` // Host path to WireGuard config file (required when enabled)
-	ContainerName   string `yaml:"container_name" json:"container_name"` // Podman container name override
-	ContainerImage  string `yaml:"container_image" json:"container_image"` // OCI image override
-	KillSwitch      bool   `yaml:"kill_switch" json:"kill_switch"`       // Block traffic if VPN drops
-	PodmanBinary    string `yaml:"podman_binary" json:"podman_binary"`   // Path to podman binary
+	Enabled        bool   `yaml:"enabled" json:"enabled"`                 // Enable VPN gateway
+	Country        string `yaml:"country" json:"country"`                 // Preferred VPN server country
+	Server         string `yaml:"server" json:"server"`                   // Specific VPN server name
+	WGConfigPath   string `yaml:"wg_config_path" json:"wg_config_path"`   // Host path to WireGuard config file (required when enabled)
+	ContainerName  string `yaml:"container_name" json:"container_name"`   // Podman container name override
+	ContainerImage string `yaml:"container_image" json:"container_image"` // OCI image override
+	KillSwitch     bool   `yaml:"kill_switch" json:"kill_switch"`         // Block traffic if VPN drops
+	PodmanBinary   string `yaml:"podman_binary" json:"podman_binary"`     // Path to podman binary
 }
 
 // SandboxConfig controls the malware sandbox.
@@ -153,6 +153,12 @@ func (c *Config) Validate() error {
 		if err := prog.Validate(); err != nil {
 			return fmt.Errorf("program %q: %w", prog.ID, err)
 		}
+		if prog.NetworkPolicy.VPN == "required" && !c.Global.VPN.Enabled {
+			return fmt.Errorf("program %q: VPN is required but global VPN is disabled", prog.ID)
+		}
+		if prog.NetworkPolicy.VPN == "prohibited" && c.Global.VPN.Enabled {
+			return fmt.Errorf("program %q: VPN is prohibited but global VPN is enabled", prog.ID)
+		}
 	}
 	return nil
 }
@@ -183,6 +189,9 @@ func (g *GlobalConfig) Validate() error {
 	}
 	if g.VPN.Enabled && g.VPN.WGConfigPath == "" {
 		return fmt.Errorf("vpn.wg_config_path is required when vpn is enabled")
+	}
+	if g.Database.MaxConns < 0 || g.Database.MaxConns > 100 {
+		return fmt.Errorf("database.max_connections must be 0-100, got %d", g.Database.MaxConns)
 	}
 	return nil
 }

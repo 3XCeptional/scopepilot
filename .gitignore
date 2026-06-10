@@ -1,5 +1,6 @@
 # Binaries
 /pentest
+/bin/
 *.exe
 *.test
 *.out
@@ -26,6 +27,16 @@ reports/
 # Build artifacts
 dist/
 build/
+__pycache__/
+*.pyc
+dashboard/dashboard.html
+dashboard/dashboard.png
+demo/scopepilot-demo.*
+demo/scopepilot-server.log
+
+# Virtual environments
+.venv/
+.venv*/
 
 # IDE
 .vscode/
@@ -46,3 +57,9 @@ wordlists/custom/
 
 # Hermes
 .hermes/
+
+# Playwright browser binaries (downloaded at project level)
+.playwright-browsers/
+
+# Development tools
+graphify-out/

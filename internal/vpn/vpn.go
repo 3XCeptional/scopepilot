@@ -255,6 +255,7 @@ func (ctl *Controller) startContainer() error {
 		"run", "-d",
 		"--name", ctl.cfg.ContainerName,
 		"--cap-add", "NET_ADMIN",
+		"--device", "/dev/net/tun",
 		"--sysctl", "net.ipv4.conf.all.src_valid_mark=1",
 		"-v", ctl.cfg.WGConfigPath + ":/config/wg0.conf:ro",
 	}

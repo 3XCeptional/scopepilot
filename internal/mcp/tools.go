@@ -1,6 +1,7 @@
 package mcp
 
 import (
+	"context"
 	"fmt"
 	"net/url"
 	"strings"
@@ -11,8 +12,19 @@ import (
 )
 
 // ListTools returns the definitions of all available MCP tools.
+// isKnownTool reports whether name matches a tool advertised by ListTools.
+// Lets the JSON-RPC layer treat a bare tool name as a callable method.
+func (s *Server) isKnownTool(name string) bool {
+	for _, t := range s.ListTools() {
+		if t.Name == name {
+			return true
+		}
+	}
+	return false
+}
+
 func (s *Server) ListTools() []ToolDef {
-	return []ToolDef{
+	tools := []ToolDef{
 		{
 			Name:        "get_scope_status",
 			Description: "Returns a summary of the current program scope, including include/exclude rule counts and program ID.",
@@ -84,6 +96,14 @@ func (s *Server) ListTools() []ToolDef {
 				"type":  "array",
 				"items": map[string]interface{}{"type": "object"},
 			},
+		},
+		{
+			Name:        "get_recent_decisions",
+			Description: "Returns the 50 most recent audit decisions (newest first).",
+			InputSchema: map[string]interface{}{
+				"type": "object", "properties": map[string]interface{}{}, "required": []string{}, "additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{"type": "array", "items": map[string]interface{}{"type": "object"}},
 		},
 		{
 			Name:        "get_ratelimit_status",
@@ -205,6 +225,67 @@ func (s *Server) ListTools() []ToolDef {
 			},
 		},
 	}
+
+	s.mu.RLock()
+	specialistsRegistered := len(s.specialists) > 0
+	s.mu.RUnlock()
+	if specialistsRegistered {
+		tools = append(tools, specialistToolDefinitions()...)
+	}
+
+	return tools
+}
+
+func specialistToolDefinitions() []ToolDef {
+	targets := map[string]interface{}{
+		"type":        "array",
+		"description": "Authorized hostnames to assess.",
+		"items":       map[string]interface{}{"type": "string"},
+		"minItems":    float64(1),
+		"maxItems":    float64(100),
+	}
+	result := map[string]interface{}{"type": "object"}
+	return []ToolDef{
+		{
+			Name:        "run_recon_specialist",
+			Description: "Runs bounded passive BBOT reconnaissance after scope and kill-switch checks.",
+			InputSchema: map[string]interface{}{
+				"type":                 "object",
+				"properties":           map[string]interface{}{"targets": targets},
+				"required":             []string{"targets"},
+				"additionalProperties": false,
+			},
+			OutputSchema: result,
+		},
+		{
+			Name:        "run_vuln_specialist",
+			Description: "Runs bounded Nuclei vulnerability checks after scope and kill-switch checks.",
+			InputSchema: map[string]interface{}{
+				"type":                 "object",
+				"properties":           map[string]interface{}{"targets": targets},
+				"required":             []string{"targets"},
+				"additionalProperties": false,
+			},
+			OutputSchema: result,
+		},
+		{
+			Name:        "run_gate_specialist",
+			Description: "Runs verified-only Gate checks after scope, kill-switch, bearer-auth, and separate operator-approval checks.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"targets": targets,
+					"approval_token": map[string]interface{}{
+						"type":        "string",
+						"description": "Separate operator approval token configured on the server.",
+					},
+				},
+				"required":             []string{"targets", "approval_token"},
+				"additionalProperties": false,
+			},
+			OutputSchema: result,
+		},
+	}
 }
 
 // validateParams checks that params contains all required fields and no
@@ -265,7 +346,7 @@ func validateParams(tool ToolDef, params map[string]interface{}) error {
 // It validates parameters against the tool's schema, invokes the underlying
 // implementation, logs the invocation to the audit log, and returns the
 // structured result.
-func (s *Server) CallTool(name string, params map[string]interface{}) (interface{}, error) {
+func (s *Server) callTool(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
 	tools := s.ListTools()
 
 	var toolDef *ToolDef
@@ -296,6 +377,9 @@ func (s *Server) CallTool(name string, params map[string]interface{}) (interface
 	case "get_audit_log":
 		result = s.handleGetAuditLog(params)
 
+	case "get_recent_decisions":
+		result = s.store.RecentEntries(50)
+
 	case "get_ratelimit_status":
 		result = s.handleGetRateLimitStatus()
 
@@ -309,7 +393,10 @@ func (s *Server) CallTool(name string, params map[string]interface{}) (interface
 		result = s.handleIsKillSwitchActive()
 
 	case "run_safe_check":
-		result = s.handleRunSafeCheck(params)
+		result, err = s.handleRunSafeCheck(params)
+
+	case "run_recon_specialist", "run_vuln_specialist", "run_gate_specialist":
+		result, err = s.handleRunSpecialist(ctx, name, params)
 
 	default:
 		return nil, fmt.Errorf("unknown tool: %q", name)
@@ -419,38 +506,98 @@ func (s *Server) handleIsKillSwitchActive() map[string]interface{} {
 	}
 }
 
-func (s *Server) handleRunSafeCheck(params map[string]interface{}) map[string]interface{} {
+func (s *Server) handleRunSafeCheck(params map[string]interface{}) (map[string]interface{}, error) {
 	urlsRaw, ok := params["urls"]
 	if !ok {
-		return map[string]interface{}{
-			"results": []*proxy.CheckResult{},
-			"error":   "missing 'urls' parameter",
-		}
+		return nil, fmt.Errorf("missing 'urls' parameter")
 	}
 
 	urlsIface, ok := urlsRaw.([]interface{})
 	if !ok {
-		return map[string]interface{}{
-			"results": []*proxy.CheckResult{},
-			"error":   "'urls' must be an array of strings",
-		}
+		return nil, fmt.Errorf("'urls' must be an array of strings")
 	}
 
 	urls := make([]string, 0, len(urlsIface))
-	for _, u := range urlsIface {
-		if s, ok := u.(string); ok {
-			// Normalize: ensure URL has a scheme
-			if !strings.Contains(s, "://") {
-				s = "https://" + s
-			}
-			if _, err := url.Parse(s); err == nil {
-				urls = append(urls, s)
-			}
+	for i, u := range urlsIface {
+		// A safety gateway must reject malformed target input loudly rather
+		// than silently dropping it — a skipped element looks identical to a
+		// passed check to the caller, which is exactly the kind of gap this
+		// gate exists to close.
+		s, ok := u.(string)
+		if !ok {
+			return nil, fmt.Errorf("'urls' must be an array of strings (element %d is %T)", i, u)
+		}
+		// Normalize: ensure URL has a scheme
+		if !strings.Contains(s, "://") {
+			s = "https://" + s
+		}
+		if _, err := url.Parse(s); err == nil {
+			urls = append(urls, s)
 		}
 	}
 
 	results := s.prx.RunSafeCheck(urls)
 	return map[string]interface{}{
 		"results": results,
+	}, nil
+}
+
+
+func (s *Server) handleRunSpecialist(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
+	if s.ks.IsActive() {
+		return nil, fmt.Errorf("kill switch is active; specialist execution denied")
 	}
+
+	targets, err := specialistTargets(params["targets"])
+	if err != nil {
+		return nil, err
+	}
+
+	s.mu.RLock()
+	runner := s.specialists[name]
+	cfg := s.specialistConfig
+	gateToken := s.gateApprovalToken
+	s.mu.RUnlock()
+	if runner == nil {
+		return nil, fmt.Errorf("specialist %q is not registered", name)
+	}
+
+	if name == "run_gate_specialist" {
+		if gateToken == "" {
+			return nil, fmt.Errorf("gate specialist approval is not configured")
+		}
+		approvalToken, _ := params["approval_token"].(string)
+		if approvalToken != gateToken {
+			return nil, fmt.Errorf("gate specialist approval denied")
+		}
+		cfg.AllowExploitation = true
+	}
+
+	return runner.Run(ctx, targets, cfg)
+}
+
+func specialistTargets(raw interface{}) ([]string, error) {
+	var targets []string
+	switch values := raw.(type) {
+	case []interface{}:
+		targets = make([]string, 0, len(values))
+		for _, value := range values {
+			target, ok := value.(string)
+			if !ok || target == "" {
+				return nil, fmt.Errorf("targets must contain non-empty strings")
+			}
+			targets = append(targets, target)
+		}
+	case []string:
+		targets = append(targets, values...)
+	default:
+		return nil, fmt.Errorf("targets must be an array of strings")
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("at least one target is required")
+	}
+	if len(targets) > 100 {
+		return nil, fmt.Errorf("at most 100 targets are allowed")
+	}
+	return targets, nil
 }

@@ -14,15 +14,26 @@
 #     -v /path/to/wg0.conf:/config/wg0.conf:ro \
 #     localhost/scopepilot-wireguard:latest
 
-FROM docker.io/alpine:3.21
+FROM docker.io/library/rust:1.88-alpine3.21@sha256:047b9d1e25bee8cadddd015a8d9a37af8668d74db1009fd7cce1240d627f414e AS builder
+# ring 0.17.14 uses C11 _Static_assert expressions rejected in C23 default mode.
+# Reset to C17 and install C headers for ring's C dependencies.
+RUN apk add --no-cache build-base musl-dev linux-headers
+ENV CFLAGS="-std=gnu17 -U__STDC_VERSION__"
+RUN cargo install boringtun-cli --version 0.7.1 --locked --root /usr/local 2>/dev/null \
+    || cargo install boringtun-cli --locked --root /usr/local
 
+FROM docker.io/alpine:3.21@sha256:1832327faf048390adc33852575d37c7ba155e064a339e78b9bd81983a8c7a00
 RUN apk add --no-cache \
+    ca-certificates \
     wireguard-tools \
     curl \
     iptables \
     ip6tables \
-    boringtun \
     && rm -rf /var/cache/apk/*
+# The crate installs as 'boringtun-cli', but the entrypoint script
+# and wg-quick expect 'boringtun'. Create a symlink to match.
+COPY --from=builder /usr/local/bin/boringtun-cli /usr/local/bin/boringtun-cli
+RUN ln -s boringtun-cli /usr/local/bin/boringtun
 
 COPY <<"EOF" /entrypoint.sh
 #!/bin/sh
@@ -94,4 +105,7 @@ RUN chmod +x /entrypoint.sh
 
 EXPOSE 51820/udp
 
-CMD ["/entrypoint.sh"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD wg show wg0
+
+ENTRYPOINT ["/entrypoint.sh"]

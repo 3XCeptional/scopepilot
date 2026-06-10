@@ -22,7 +22,6 @@ services:
     build:
       context: .
       dockerfile: containers/scopepilot/Containerfile
-    container_name: scopepilot
     ports:
       - "127.0.0.1:8443:8443"   # Proxy (localhost only)
       - "127.0.0.1:9090:9090"   # MCP server (localhost only)
@@ -31,6 +30,7 @@ services:
       - "9090"
     networks:
       - scopepilot-net
+      - scopepilot-data
     volumes:
       - ./config:/etc/scopepilot:ro
     read_only: true
@@ -39,24 +39,32 @@ services:
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
+    environment:
+      SCOPEPILOT_MCP_API_KEY: ${SCOPEPILOT_MCP_API_KEY:?set SCOPEPILOT_MCP_API_KEY}
+      SCOPEPILOT_DEACTIVATION_TOKEN: ${SCOPEPILOT_DEACTIVATION_TOKEN:-}
+      SCOPEPILOT_GATE_APPROVAL_TOKEN: ${SCOPEPILOT_GATE_APPROVAL_TOKEN:-}
+      SCOPEPILOT_POSTGRES_ENABLED: "true"
+      DATABASE_URL: postgres://scopepilot:${SCOPEPILOT_POSTGRES_PASSWORD:?set SCOPEPILOT_POSTGRES_PASSWORD}@postgres:5432/scopepilot?sslmode=disable
+    depends_on:
+      postgres:
+        condition: service_healthy
     deploy:
       resources:
         limits:
           cpus: "0.5"
           memory: 256M
     healthcheck:
-      test: ["CMD", "/scopepilot", "health"]
+      test: ["CMD", "/scopepilot", "health", "--proxy-url=http://127.0.0.1:8443", "--mcp-url=http://127.0.0.1:9090"]
       interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
-    command: ["server", "--listen-proxy=:8443", "--listen-mcp=:9090"]
+    command: ["server", "--config=/etc/scopepilot/config.yaml", "--listen-proxy=:8443", "--listen-mcp=:9090"]
 
   fixture:
     build:
       context: .
       dockerfile: containers/fixture/Containerfile
-    container_name: scopepilot-fixture
     ports:
       - "127.0.0.1:8080:8080"
     expose:
@@ -82,19 +90,21 @@ services:
 
   postgres:
     image: docker.io/postgres:17-alpine
-    container_name: scopepilot-db
     expose:
       - "5432"
     networks:
-      - scopepilot-net
+      - scopepilot-data
     volumes:
       - pgdata:/var/lib/postgresql/data
     environment:
       POSTGRES_USER: scopepilot
-      POSTGRES_PASSWORD: scopepilot
+      POSTGRES_PASSWORD: ${SCOPEPILOT_POSTGRES_PASSWORD:?set SCOPEPILOT_POSTGRES_PASSWORD}
       POSTGRES_DB: scopepilot
     cap_drop:
       - ALL
+    cap_add:
+      - SETUID
+      - SETGID
     security_opt:
       - no-new-privileges:true
     restart: unless-stopped
@@ -115,6 +125,10 @@ networks:
     driver: bridge
     internal: true
     name: scopepilot-net
+  scopepilot-data:
+    driver: bridge
+    internal: true
+    name: scopepilot-data
 
 volumes:
   pgdata:

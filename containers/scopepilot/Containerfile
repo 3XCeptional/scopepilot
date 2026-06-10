@@ -1,7 +1,7 @@
 # ============================================================================
 # Stage 1 — Build the ScopePilot Go binary
 # ============================================================================
-FROM golang:1.26-alpine AS builder
+FROM docker.io/library/golang:1.26-alpine@sha256:5e5e60ea14e48d2039718813f156ed8ceaf1cee274d9930bde91dcb8cfd90103 AS builder
 
 # Install CA certificates for TLS
 RUN apk add --no-cache ca-certificates
@@ -19,6 +19,7 @@ COPY . .
 ARG TARGETARCH=arm64
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
     go build \
+      -tags postgres \
       -buildvcs=false \
       -ldflags="-s -w -extldflags=-static" \
       -o /scopepilot \
@@ -27,7 +28,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} \
 # ============================================================================
 # Stage 2 — Minimal runtime image
 # ============================================================================
-FROM gcr.io/distroless/static-debian12:nonroot
+FROM gcr.io/distroless/static-debian12:nonroot@sha256:82043e1cb4913437a9e90c2425b164d96031469894edc6011eed045001ba7181
 
 # Copy the binary and TLS certificates from the builder
 COPY --from=builder /scopepilot /scopepilot
@@ -47,6 +48,9 @@ LABEL description="ScopePilot — scope-enforcing HTTP proxy with MCP tool serve
 
 EXPOSE 8443
 EXPOSE 9090
+
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+  CMD ["/scopepilot", "health", "--proxy-url=http://127.0.0.1:8443", "--mcp-url=http://127.0.0.1:9090"]
 
 ENTRYPOINT ["/scopepilot"]
 CMD ["server", "--listen-proxy=:8443", "--listen-mcp=:9090"]

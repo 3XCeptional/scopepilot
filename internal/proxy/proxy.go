@@ -12,12 +12,14 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net"
 	"net/http"
 	"net/url"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
@@ -59,6 +61,10 @@ type Proxy struct {
 	// net.DefaultResolver.LookupHost.
 	lookupHostFn func(ctx context.Context, host string) ([]string, error)
 
+	// dialFn abstracts the outbound TCP dial used by CONNECT tunnels, for
+	// testability. Defaults to net.DialTimeout.
+	dialFn func(network, addr string, timeout time.Duration) (net.Conn, error)
+
 	// resolvedIPs stores the IPs resolved for each host during safety
 	// validation, so the transport's DialContext can connect directly to
 	// those IPs (preventing DNS rebinding attacks).
@@ -75,6 +81,16 @@ func (p *Proxy) SetDNSOverride(fn func(ctx context.Context, host string) ([]stri
 		p.lookupHostFn = net.DefaultResolver.LookupHost
 	} else {
 		p.lookupHostFn = fn
+	}
+}
+
+// SetDialOverride replaces the outbound TCP dial function used by CONNECT
+// tunnels. Used by tests to redirect connections. Pass nil to restore default.
+func (p *Proxy) SetDialOverride(fn func(network, addr string, timeout time.Duration) (net.Conn, error)) {
+	if fn == nil {
+		p.dialFn = net.DialTimeout
+	} else {
+		p.dialFn = fn
 	}
 }
 
@@ -494,9 +510,15 @@ func RedactResponseHeaders(header http.Header) {
 func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	// Health check endpoint — bypasses all safety layers.
 	if r.URL.Path == "/health" {
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		w.Write([]byte(`{"status":"ok","program_id":"` + p.ProgramID + `"}`))
+		p.writeHealth(w)
+		return
+	}
+
+	// CONNECT requests open a raw TCP tunnel (used for HTTPS via an HTTP
+	// proxy). They run the full safety chain then hijack the connection and
+	// relay bytes, rather than forwarding through the http.Client.
+	if r.Method == http.MethodConnect {
+		p.handleConnect(w, r)
 		return
 	}
 
@@ -510,6 +532,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        r.URL.String(),
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] BLOCK %s %s - %s", r.Method, r.Host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -524,6 +547,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"method":     r.Method,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, r.Host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -541,6 +565,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -555,6 +580,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -571,6 +597,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -585,6 +612,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -599,6 +627,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -613,6 +642,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -625,6 +655,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] BLOCK %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -657,6 +688,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			"url":        requestURI,
 			"program_id": p.ProgramID,
 		})
+		log.Printf("[proxy] DENY %s %s - %s", r.Method, host, reason)
 		p.WriteDenyResponse(w, reason)
 		return
 	}
@@ -669,7 +701,198 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"program_id": p.ProgramID,
 		"ips":        ips,
 	})
+	log.Printf("[proxy] ALLOW %s %s%s", r.Method, host, parsedURL.Path)
 	p.ForwardRequest(w, r)
+}
+
+// writeHealth writes a standard health check JSON response.
+func (p *Proxy) writeHealth(w http.ResponseWriter) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(`{"status":"ok","program_id":"` + p.ProgramID + `"}`))
+}
+
+// handleConnect services a CONNECT request. It runs the same safety chain as
+// ServeHTTP (kill switch, active-testing gate, scheme/port, scope, DNS + IP
+// blocklist, rate limit), then hijacks the client connection, dials the
+// pinned resolved IP, and relays bytes bidirectionally. The dial target is the
+// resolved IP (not the hostname) to prevent DNS rebinding.
+func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
+	authority := r.Host
+	if authority == "" {
+		authority = r.URL.Host
+	}
+
+	logDeny := func(reason string, extra map[string]interface{}) {
+		data := map[string]interface{}{
+			"reason":     reason,
+			"authority":  authority,
+			"method":     r.Method,
+			"program_id": p.ProgramID,
+		}
+		for k, v := range extra {
+			data[k] = v
+		}
+		p.LogDecision("deny", data)
+	}
+
+	// 1. Global kill switch.
+	if p.CheckKillSwitch() {
+		reason := "global kill switch is active"
+		p.LogDecision("block", map[string]interface{}{
+			"reason":     reason,
+			"authority":  authority,
+			"method":     r.Method,
+			"program_id": p.ProgramID,
+		})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 2. Active testing gate.
+	if !p.ActiveTestingEnabled {
+		reason := "active testing disabled for this program"
+		logDeny(reason, nil)
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 3. Parse host:port from the CONNECT authority.
+	host, portStr, err := net.SplitHostPort(authority)
+	if err != nil {
+		reason := fmt.Sprintf("invalid CONNECT authority %q: %v", authority, err)
+		logDeny(reason, nil)
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+	host = normalize.Host(host)
+
+	// 4. Validate port. CONNECT tunnels are HTTPS, so validate the https scheme.
+	if !p.ValidateScheme("https") {
+		reason := "scheme \"https\" not allowed"
+		logDeny(reason, nil)
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+	port, portOK := p.ValidatePort(portStr, "https")
+	if !portOK {
+		reason := fmt.Sprintf("port %q not allowed", portStr)
+		logDeny(reason, map[string]interface{}{"host": host, "port": portStr})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 5. Host scope (exclusions override inclusions).
+	inScope, scopeReason := p.CheckHostScope(host)
+	if !inScope {
+		reason := fmt.Sprintf("host out of scope: %s", scopeReason)
+		logDeny(reason, map[string]interface{}{"host": host})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 6. DNS resolution + IP blocklist.
+	ips, dnsErr := p.LookupHost(host)
+	if dnsErr != nil {
+		reason := fmt.Sprintf("DNS resolution failed for %s: %v", host, dnsErr)
+		logDeny(reason, map[string]interface{}{"host": host})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+	if ok, ipReason := p.ValidateIPs(ips); !ok {
+		reason := fmt.Sprintf("host %s resolves to blocked IP: %s", host, ipReason)
+		p.LogDecision("block", map[string]interface{}{
+			"reason":     reason,
+			"host":       host,
+			"ips":        ips,
+			"program_id": p.ProgramID,
+		})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 7. Per-host rate limit (skipped when no limit is configured).
+	if p.Limits.RequestsPerSecondPerHost > 0 && !p.CheckRateLimit(host) {
+		reason := fmt.Sprintf("rate limit exceeded for host %s", host)
+		logDeny(reason, map[string]interface{}{"host": host})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 8. Dial the upstream. Pin to the resolved IP to prevent DNS rebinding.
+	dial := p.dialFn
+	if dial == nil {
+		dial = net.DialTimeout
+	}
+	dialAddr := net.JoinHostPort(ips[0], fmt.Sprintf("%d", port))
+	upstream, err := dial("tcp", dialAddr, 30*time.Second)
+	if err != nil {
+		reason := fmt.Sprintf("upstream dial failed: %v", err)
+		logDeny(reason, map[string]interface{}{"host": host})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+	defer upstream.Close()
+
+	// 9. Hijack the client connection so we can relay raw bytes.
+	hj, ok := w.(http.Hijacker)
+	if !ok {
+		reason := "CONNECT not supported: response writer is not a hijacker"
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+	clientConn, _, err := hj.Hijack()
+	if err != nil {
+		reason := fmt.Sprintf("hijack failed: %v", err)
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+	defer clientConn.Close()
+
+	// Signal the tunnel is established.
+	if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
+		log.Printf("[proxy] CONNECT write 200 failed: %v", err)
+		return
+	}
+
+	p.LogDecision("allow", map[string]interface{}{
+		"host":       host,
+		"authority":  authority,
+		"method":     r.Method,
+		"program_id": p.ProgramID,
+		"ips":        ips,
+	})
+	log.Printf("[connect] ALLOW %s", authority)
+
+	// 10. Relay bytes in both directions until either side closes.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var txBytes int64
+	copyConn := func(dst, src net.Conn) {
+		defer wg.Done()
+		n, _ := io.Copy(dst, src)
+		atomic.AddInt64(&txBytes, n)
+		// Unblock the other direction once one side is done.
+		if cw, ok := dst.(interface{ CloseWrite() error }); ok {
+			_ = cw.CloseWrite()
+		}
+	}
+	go copyConn(upstream, clientConn)
+	go copyConn(clientConn, upstream)
+	wg.Wait()
+	log.Printf("[connect] CLOSE %s (%d bytes tx)", authority, atomic.LoadInt64(&txBytes))
 }
 
 // ---------------------------------------------------------------------------

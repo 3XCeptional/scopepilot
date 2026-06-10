@@ -1,6 +1,9 @@
 package vpn
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 )
@@ -139,5 +142,33 @@ func TestContainerName(t *testing.T) {
 	})
 	if ctl.ContainerName() != "custom-gateway" {
 		t.Errorf("expected custom-gateway, got %q", ctl.ContainerName())
+	}
+}
+
+func TestStartContainerIncludesTunDevice(t *testing.T) {
+	dir := t.TempDir()
+	logPath := filepath.Join(dir, "podman.log")
+	fakePodman := filepath.Join(dir, "podman")
+	script := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> " + logPath + "\nexit 0\n"
+	if err := os.WriteFile(fakePodman, []byte(script), 0o700); err != nil {
+		t.Fatalf("write fake podman: %v", err)
+	}
+
+	ctl := New(Config{
+		Enabled:       true,
+		WGConfigPath:  "/tmp/wg0.conf",
+		PodmanBinary:  fakePodman,
+		ContainerName: "test-vpn",
+	})
+	if err := ctl.startContainer(); err != nil {
+		t.Fatalf("startContainer failed: %v", err)
+	}
+
+	data, err := os.ReadFile(logPath)
+	if err != nil {
+		t.Fatalf("read fake podman log: %v", err)
+	}
+	if !strings.Contains(string(data), "--device /dev/net/tun") {
+		t.Fatalf("run command did not include TUN device: %s", data)
 	}
 }

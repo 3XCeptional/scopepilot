@@ -8,6 +8,7 @@
 .DS_Store
 *.test
 *.out
+/pentest
 bin/
 .venv*
 .hermes/
@@ -25,3 +26,6 @@ pgdata/
 *.sqlite
 .demo-browser/
 .playwright-browsers/
+dashboard/
+demo/
+graphify-out/

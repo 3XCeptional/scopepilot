@@ -14,6 +14,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -226,6 +227,35 @@ func (s *PGStore) RedactEntry(entryID string, fields []string) *audit.Entry {
 func (s *PGStore) Close() error {
 	s.pool.Close()
 	return nil
+}
+
+// NewConfiguredStore creates an in-memory store unless PostgreSQL is selected
+// by configuration or DATABASE_URL. PostgreSQL failures are returned so the
+// caller can fail closed rather than losing durable audit data.
+func NewConfiguredStore(cfg StoreConfig) (Store, error) {
+	connStr := os.Getenv("DATABASE_URL")
+	if connStr == "" {
+		connStr = cfg.ConnString
+	}
+	envEnabled := os.Getenv("SCOPEPILOT_POSTGRES_ENABLED") == "true"
+	if !cfg.PostgreSQLEnabled && !envEnabled && connStr == "" {
+		return NewMemoryStore(5000), nil
+	}
+	if cfg.PostgreSQLEnabled && !envEnabled && connStr == "" {
+		return nil, fmt.Errorf("db: PostgreSQL is enabled but no connection string is configured")
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	store, err := NewPGStore(ctx, PGConfig{
+		ConnString: connStr,
+		MaxConns:   cfg.MaxConns,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return store, nil
 }
 
 // scanEntries scans audit entries from a pgx row iterator.

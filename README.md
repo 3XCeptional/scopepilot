@@ -17,9 +17,11 @@ target list → scope check → DNS revalidation → IP blocklist → rate limit
 
 ```bash
 make doctor        # Check Go, Podman environment
+export SCOPEPILOT_MCP_API_KEY="$(openssl rand -hex 32)"
+export SCOPEPILOT_POSTGRES_PASSWORD="$(openssl rand -hex 32)"
 make build         # Build containers
 make test          # Run all Go tests (9 packages, 200+ tests)
-make up            # Start ScopePilot + fixture via Podman Compose
+make up            # Start ScopePilot + PostgreSQL + fixture
 make test-unit     # Unit tests only
 make logs          # Tail logs
 make clean         # Stop and remove containers
@@ -32,8 +34,8 @@ make clean         # Stop and remove containers
 │                                                   │
 │  cmd/pentest  ◄── CLI entry point                 │
 │     │                                             │
-│  internal/mcp  ◄── JSON-RPC 2.0 server (:9090)    │
-│     │            8 typed tools for agents          │
+│  internal/mcp  ◄── authenticated JSON-RPC (:9090)  │
+│     │            core + bounded specialist tools    │
 │  internal/proxy  ◄── HTTP proxy (:8443)            │
 │     │            scope enforcement on every req    │
 │  internal/scope  ◄── host/URL/IP scope matching    │
@@ -54,7 +56,8 @@ make clean         # Stop and remove containers
 
 ## MCP Tools
 
-ScopePilot exposes 8 typed JSON-RPC 2.0 tools for agent integration:
+ScopePilot exposes 8 core tools plus 3 registered specialist tools. All MCP
+requests require `Authorization: Bearer $SCOPEPILOT_MCP_API_KEY`.
 
 | Tool | Purpose |
 |------|---------|
@@ -66,6 +69,11 @@ ScopePilot exposes 8 typed JSON-RPC 2.0 tools for agent integration:
 | `deactivate_kill_switch` | Resume after kill |
 | `is_kill_switch_active` | Check kill switch status |
 | `run_safe_check` | Batch URL validation — primary BBOT/Nuclei entry point |
+| `run_recon_specialist` | Bounded passive BBOT specialist |
+| `run_vuln_specialist` | Low-impact Nuclei specialist |
+| `run_gate_specialist` | Separately approved Gate specialist |
+
+`run_gate_specialist` also requires `SCOPEPILOT_GATE_APPROVAL_TOKEN`.
 
 ## Safety Chain (every request)
 
@@ -82,6 +90,11 @@ ScopePilot exposes 8 typed JSON-RPC 2.0 tools for agent integration:
 11. **Audit log** — every allow/deny recorded
 12. **Response redaction** — Authorization, Cookie, Set-Cookie headers stripped
 
+The proxy deliberately rejects HTTPS `CONNECT` tunneling because encrypted
+tunnels would bypass path exclusions and per-request rate limits. Active HTTPS
+scanner execution remains blocked until a TLS-aware worker/proxy design is
+implemented.
+
 ## Containers
 
 All services run in rootless Podman containers on Apple Silicon (arm64):
@@ -90,6 +103,7 @@ All services run in rootless Podman containers on Apple Silicon (arm64):
 |-----------|------|-----------|-------|
 | scopepilot | distroless/static-debian12:nonroot | cap_drop ALL, no-new-privs | 8443 (proxy), 9090 (MCP) |
 | fixture | alpine:3.21 | cap_drop ALL, no-new-privs | 8080 (test HTTP) |
+| postgres | postgres:17-alpine | cap_drop ALL, no-new-privs | internal only |
 
 - No privileged containers
 - No host networking
@@ -123,14 +137,15 @@ go vet ./...
 - [x] Append-oriented audit log with redaction
 - [x] Full safety-chain HTTP proxy
 - [x] JSON-RPC 2.0 MCP server with 8 tools
-- [x] BBOT/Nuclei safe adapter (scope-filtered execution)
-- [x] Containerfiles (scopepilot, fixture)
+- [x] Authenticated specialist MCP registration
+- [x] BBOT/Nuclei adapters require the scope proxy and fail closed for unenforceable VPN namespaces
+- [x] Containerfiles (scopepilot, fixture, WireGuard)
 - [x] compose.yaml (rootless Podman)
 - [x] Makefile (12 targets)
-- [ ] Proton VPN gateway (deferred)
-- [ ] PostgreSQL + Redis (deferred — using in-memory)
-- [ ] Specialist agents (deferred)
-- [ ] Dashboard (deferred)
+- [x] PostgreSQL-backed audit storage in the container build
+- [x] Embedded operator dashboard
+- [ ] Containerized scanner workers and TLS-aware HTTPS enforcement
+- [ ] Enforced Proton VPN egress for scanner/proxy traffic
 
 ## License
 

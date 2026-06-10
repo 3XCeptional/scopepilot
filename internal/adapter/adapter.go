@@ -8,10 +8,11 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"net/url"
+	"os"
+	"os/exec"
 	"strings"
 	"time"
-
-	"os/exec"
 )
 
 // MCPClient communicates with the ScopePilot MCP server.
@@ -19,6 +20,7 @@ type MCPClient struct {
 	BaseURL    string
 	HTTPClient *http.Client
 	ProgramID  string
+	APIKey     string
 }
 
 // MCPRequest is a JSON-RPC 2.0 request.
@@ -60,10 +62,23 @@ type RunSafeCheckResponse struct {
 
 // NewMCPClient creates a new MCP client.
 func NewMCPClient(baseURL, programID string) *MCPClient {
+	return NewMCPClientWithAPIKey(baseURL, programID, os.Getenv("SCOPEPILOT_MCP_API_KEY"))
+}
+
+// NewMCPClientWithAPIKey creates a new MCP client with an explicit bearer token.
+func NewMCPClientWithAPIKey(baseURL, programID, apiKey string) *MCPClient {
 	return &MCPClient{
 		BaseURL:    strings.TrimRight(baseURL, "/"),
 		ProgramID:  programID,
 		HTTPClient: &http.Client{Timeout: 30 * time.Second},
+		APIKey:     strings.TrimSpace(apiKey),
+	}
+}
+
+func (c *MCPClient) applyHeaders(req *http.Request) {
+	req.Header.Set("Content-Type", "application/json")
+	if c.APIKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.APIKey)
 	}
 }
 
@@ -90,13 +105,16 @@ func (c *MCPClient) CheckURL(ctx context.Context, url string) (*SafeCheckResult,
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	c.applyHeaders(httpReq)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("mcp request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mcp request returned HTTP %d", resp.StatusCode)
+	}
 
 	var mcpResp MCPResponse
 	if err := json.NewDecoder(resp.Body).Decode(&mcpResp); err != nil {
@@ -138,13 +156,16 @@ func (c *MCPClient) RunSafeCheck(ctx context.Context, urls []string) (*RunSafeCh
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
-	httpReq.Header.Set("Content-Type", "application/json")
+	c.applyHeaders(httpReq)
 
 	resp, err := c.HTTPClient.Do(httpReq)
 	if err != nil {
 		return nil, fmt.Errorf("mcp request: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("mcp request returned HTTP %d", resp.StatusCode)
+	}
 
 	var mcpResp MCPResponse
 	if err := json.NewDecoder(resp.Body).Decode(&mcpResp); err != nil {
@@ -165,12 +186,12 @@ func (c *MCPClient) RunSafeCheck(ctx context.Context, urls []string) (*RunSafeCh
 
 // BBOTConfig holds configuration for the BBOT adapter.
 type BBOTConfig struct {
-	BinaryPath string // Path to bbot binary
-	MCPClient  *MCPClient
-	DryRun     bool // If true, only check scope, don't execute BBOT
-	Timeout    time.Duration
-	ProxyURL   string           // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
-	VPNContainer string         // Container name for VPN namespace sharing (--network container:)
+	BinaryPath   string // Path to bbot binary
+	MCPClient    *MCPClient
+	DryRun       bool // If true, only check scope, don't execute BBOT
+	Timeout      time.Duration
+	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	VPNContainer string // Container name for VPN namespace sharing (--network container:)
 }
 
 // NucleiConfig holds configuration for the Nuclei adapter.
@@ -180,6 +201,7 @@ type NucleiConfig struct {
 	DryRun       bool
 	Timeout      time.Duration
 	TemplateDir  string // Path to nuclei templates
+	Severities   []string
 	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
 	VPNContainer string // Container name for VPN namespace sharing (--network container:)
 }
@@ -230,6 +252,9 @@ func (c *MCPClient) FilterInScope(ctx context.Context, hosts []string) ([]string
 // RunBBOT runs BBOT against in-scope targets through the scope proxy.
 func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult, error) {
 	result := &BBOTResult{DryRun: cfg.DryRun}
+	if cfg.MCPClient == nil {
+		return nil, fmt.Errorf("bbot: MCP client is required")
+	}
 
 	// Step 1: Filter targets through MCP scope check.
 	inScope, blocked := cfg.MCPClient.FilterInScope(ctx, targets)
@@ -242,6 +267,15 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 
 	if len(inScope) == 0 {
 		return result, nil
+	}
+	if cfg.ProxyURL == "" {
+		return nil, fmt.Errorf("bbot: proxy URL is required for execution")
+	}
+	if err := validateProxyURL(cfg.ProxyURL); err != nil {
+		return nil, fmt.Errorf("bbot: %w", err)
+	}
+	if cfg.VPNContainer != "" {
+		return nil, fmt.Errorf("bbot: VPN namespace %q cannot be enforced for a host process; use a containerized worker", cfg.VPNContainer)
 	}
 
 	// Step 2: Build BBOT command with safe args.
@@ -257,11 +291,10 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 		"-o", "json",
 	}
 
-	if cfg.ProxyURL != "" {
-		args = append(args, "--proxy", cfg.ProxyURL)
-	}
+	args = append(args, "--proxy", cfg.ProxyURL)
 
 	cmd := exec.CommandContext(ctx, cfg.BinaryPath, args...)
+	cmd.Env = proxyEnvironment(cfg.ProxyURL)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -300,6 +333,9 @@ func parseBBOTOutput(output string) []string {
 // RunNuclei runs Nuclei against in-scope targets through the scope proxy.
 func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*NucleiResult, error) {
 	result := &NucleiResult{DryRun: cfg.DryRun}
+	if cfg.MCPClient == nil {
+		return nil, fmt.Errorf("nuclei: MCP client is required")
+	}
 
 	// Step 1: Filter targets through MCP scope check.
 	inScope, blocked := cfg.MCPClient.FilterInScope(ctx, targets)
@@ -313,26 +349,53 @@ func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*Nuclei
 	if len(inScope) == 0 {
 		return result, nil
 	}
+	if strings.TrimSpace(cfg.TemplateDir) == "" {
+		return nil, fmt.Errorf("nuclei: template directory is required for execution")
+	}
+	if cfg.ProxyURL == "" {
+		return nil, fmt.Errorf("nuclei: proxy URL is required for execution")
+	}
+	if err := validateProxyURL(cfg.ProxyURL); err != nil {
+		return nil, fmt.Errorf("nuclei: %w", err)
+	}
+	if cfg.VPNContainer != "" {
+		return nil, fmt.Errorf("nuclei: VPN namespace %q cannot be enforced for a host process; use a containerized worker", cfg.VPNContainer)
+	}
 
 	// Step 2: Build Nuclei command with safe args.
-	// Use: nuclei -u <target> -t <templates> -json -o - — only passive/tech detection
-	// --no-httpx, --no-format, --bulk-size, --concurrency low.
-	// Explicitly no exploit/severity flags that would cause exploitation.
+	// Keep concurrency low, exclude intrusive template classes, and default
+	// to informational/low severities unless a separately authorized caller
+	// supplies a stricter severity allowlist.
 	args := []string{
-		"-u", strings.Join(inScope, ","),
 		"-t", cfg.TemplateDir,
 		"-json",
 		"-o", "-",
 		"--no-httpx",
 		"--bulk-size", "5",
 		"--concurrency", "2",
+		"-exclude-tags", "fuzz,dos,headless,code",
+	}
+	for _, target := range inScope {
+		args = append(args, "-u", target)
 	}
 
-	if cfg.ProxyURL != "" {
-		args = append(args, "-proxy", cfg.ProxyURL)
+	severities := cfg.Severities
+	if len(severities) == 0 {
+		severities = []string{"info", "low"}
 	}
+	for _, severity := range severities {
+		switch severity {
+		case "info", "low", "medium", "high", "critical":
+		default:
+			return nil, fmt.Errorf("nuclei: unsupported severity %q", severity)
+		}
+	}
+	args = append(args, "-severity", strings.Join(severities, ","))
+
+	args = append(args, "-proxy", cfg.ProxyURL)
 
 	cmd := exec.CommandContext(ctx, cfg.BinaryPath, args...)
+	cmd.Env = proxyEnvironment(cfg.ProxyURL)
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -368,4 +431,47 @@ func parseNucleiOutput(output string) []string {
 		}
 	}
 	return findings
+}
+
+func validateProxyURL(raw string) error {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return fmt.Errorf("invalid proxy URL: %w", err)
+	}
+	if u.Scheme != "http" && u.Scheme != "https" {
+		return fmt.Errorf("proxy URL must use http or https")
+	}
+	if u.Host == "" {
+		return fmt.Errorf("proxy URL must include a host")
+	}
+	if u.User != nil {
+		return fmt.Errorf("proxy URL must not contain credentials")
+	}
+	return nil
+}
+
+func proxyEnvironment(proxyURL string) []string {
+	env := make([]string, 0, len(os.Environ())+8)
+	for _, entry := range os.Environ() {
+		key, _, ok := strings.Cut(entry, "=")
+		if !ok {
+			continue
+		}
+		switch strings.ToUpper(key) {
+		case "HTTP_PROXY", "HTTPS_PROXY", "ALL_PROXY", "NO_PROXY":
+			continue
+		default:
+			env = append(env, entry)
+		}
+	}
+	return append(env,
+		"HTTP_PROXY="+proxyURL,
+		"HTTPS_PROXY="+proxyURL,
+		"ALL_PROXY="+proxyURL,
+		"NO_PROXY=",
+		"http_proxy="+proxyURL,
+		"https_proxy="+proxyURL,
+		"all_proxy="+proxyURL,
+		"no_proxy=",
+	)
 }

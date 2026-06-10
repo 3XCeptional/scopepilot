@@ -2,7 +2,7 @@
 # ScopePilot Test Fixture — synthetic HTTP server for integration tests
 # Uses a minimal Alpine-based Go build.
 # ============================================================================
-FROM golang:1.26-alpine@sha256:e6dc5e1daecac7eb7f1793fbbb88051171d9d2f9794ede4a36f94a97b9896487 AS builder
+FROM docker.io/library/golang:1.26-alpine@sha256:5e5e60ea14e48d2039718813f156ed8ceaf1cee274d9930bde91dcb8cfd90103 AS builder
 
 WORKDIR /src
 COPY go.mod go.sum ./

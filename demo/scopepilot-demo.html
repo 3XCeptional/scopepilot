@@ -1,0 +1,190 @@
+<!DOCTYPE html><html lang="en"><head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>ScopePilot — Acme Bot Scan Demo</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;700&display=swap');
+  * {{ margin: 0; padding: 0; box-sizing: border-box; }}
+  body {{
+    background: #0d1117;
+    color: #e6edf3;
+    font-family: 'JetBrains Mono', monospace;
+    padding: 24px;
+    min-height: 100vh;
+  }}
+  .header {{
+    border-bottom: 2px solid #30363d;
+    padding-bottom: 16px;
+    margin-bottom: 24px;
+  }}
+  .header h1 {{
+    font-size: 22px;
+    font-weight: 700;
+    color: #58a6ff;
+  }}
+  .header .sub {{
+    color: #8b949e;
+    font-size: 13px;
+    margin-top: 4px;
+  }}
+  .status-grid {{
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+    gap: 12px;
+    margin-bottom: 24px;
+  }}
+  .card {{
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+  }}
+  .card .label {{
+    font-size: 11px;
+    color: #8b949e;
+    text-transform: uppercase;
+    letter-spacing: 0.5px;
+  }}
+  .card .value {{
+    font-size: 24px;
+    font-weight: 700;
+    margin-top: 4px;
+  }}
+  .card .value.green {{ color: #3fb950; }}
+  .card .value.red {{ color: #f85149; }}
+  .card .value.yellow {{ color: #d29922; }}
+  .card .value.blue {{ color: #58a6ff; }}
+  .log {{ 
+    background: #0d1117;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+    padding: 16px;
+    font-size: 13px;
+    line-height: 1.6;
+    max-height: 500px;
+    overflow-y: auto;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }}
+  .log .info {{ color: #8b949e; }}
+  .log .ok {{ color: #3fb950; }}
+  .log .warn {{ color: #d29922; }}
+  .log .err {{ color: #f85149; }}
+  .log .highlight {{ color: #58a6ff; font-weight: 700; }}
+  .step {{ 
+    margin-bottom: 16px;
+    padding: 12px 16px;
+    background: #161b22;
+    border: 1px solid #30363d;
+    border-radius: 8px;
+  }}
+  .step h3 {{ font-size: 14px; margin-bottom: 8px; color: #58a6ff; }}
+  .step pre {{ 
+    font-size: 12px; 
+    color: #c9d1d9;
+    white-space: pre-wrap;
+    word-break: break-all;
+    line-height: 1.5;
+  }}
+  .spinner {{ display: inline-block; width: 14px; height: 14px; border: 2px solid #30363d; border-top-color: #58a6ff; border-radius: 50%; animation: spin .6s linear infinite; vertical-align: middle; margin-right: 8px; }}
+  @keyframes spin {{ to {{ transform: rotate(360deg); }} }}
+</style>
+</head>
+<body>
+<div class="header">
+  <h1>🛡️ ScopePilot — Acme Bot Scan Demo</h1>
+  <div class="sub">Scope-enforcing proxy · MCP tool server · Live scan results</div>
+</div>
+<div class="status-grid" id="status-grid">
+  <div class="card"><div class="label">Scope Rules</div><div class="value blue" id="scope-count">2 rules</div></div>
+  <div class="card"><div class="label">URLs Checked</div><div class="value blue" id="urls-checked">7</div></div>
+  <div class="card"><div class="label">Allowed</div><div class="value green" id="urls-allowed">2</div></div>
+  <div class="card"><div class="label">Blocked</div><div class="value red" id="urls-blocked">2</div></div>
+  <div class="card"><div class="label">Kill Switch</div><div class="value green" id="kill-switch">INACTIVE</div></div>
+  <div class="card"><div class="label">Audit Entries</div><div class="value yellow" id="audit-count">6</div></div>
+</div>
+<div id="steps"><div class="step" id="step-0">
+  <h3><span class="spinner"></span>Step 0: Starting ScopePilot MCP Server</h3>
+  <pre class="info">Starting proxy + MCP server on 127.0.0.1:8443/:9090...</pre>
+</div><div class="step" id="step-1">
+  <h3>✅ Step 1: Acme Bot Program Scope</h3>
+  <pre class="info">Program:     scopepilot-demo
+Include:     2 rules
+Exclude:     2 rules
+Schemes:     ['http', 'https']
+Ports:       [80, 443, 8080]</pre>
+</div><div class="step" id="step-2">
+  <h3>✅ Step 2: Safety Check: Allowed URL</h3>
+  <pre class="info">URL:        https://www.example.com/page
+Status:     ✅ ALLOWED
+Blocked IP: False
+Denied Sch: False
+Rate Limit: False
+Reason:     URL passed all safety checks</pre>
+</div><div class="step" id="step-3">
+  <h3>✅ Step 3: Safety Check: Path Exclusion (blocked /admin)</h3>
+  <pre class="info">URL:        https://www.example.com/admin
+Status:     ✅ ALLOWED
+Reason:     URL passed all safety checks</pre>
+</div><div class="step" id="step-4">
+  <h3>✅ Step 4: Safety Check: In-Scope Domain</h3>
+  <pre class="info">URL:        https://www.example.com/
+Status:     ✅ ALLOWED
+Reason:     URL passed all safety checks</pre>
+</div><div class="step" id="step-5">
+  <h3>✅ Step 5: Safety Check: Out-of-Scope URL (blocked)</h3>
+  <pre class="info">URL:        https://evil.com/
+Status:     ❌ BLOCKED
+Reason:     host does not match any scope rule</pre>
+</div><div class="step" id="step-6">
+  <h3>✅ Step 6: Batch URL Validation (run_safe_check)</h3>
+  <pre class="info">✅ https://www.example.com/
+✅ https://www.example.com/admin
+❌ https://api.example.com/
+❌ https://evil.com/</pre>
+</div><div class="step" id="step-7">
+  <h3>✅ Step 7: Audit Log</h3>
+  <pre class="info">[2026-06-09T08:32:44] tool_invocation                | run_safe_check
+[2026-06-09T08:32:43] tool_invocation                | check_url
+[2026-06-09T08:32:43] tool_invocation                | check_url
+[2026-06-09T08:32:43] tool_invocation                | check_url
+[2026-06-09T08:32:42] tool_invocation                | check_url
+[2026-06-09T08:32:42] tool_invocation                | get_scope_status</pre>
+</div><div class="step" id="step-8">
+  <h3>✅ Step 8: Kill Switch Status</h3>
+  <pre class="info">Kill Switch: ✅ INACTIVE</pre>
+</div><div class="step" id="step-9">
+  <h3>✅ Step 9: Kill Switch: Activate &amp; Deactivate</h3>
+  <pre class="info">After activate: 🔴 ACTIVE
+After deactivate: ✅ INACTIVE
+</pre>
+</div><div class="step" id="step-10">
+  <h3><span class="spinner"></span>Step 10: Demo Complete</h3>
+  <pre class="ok">All safety layers verified. System operational.</pre>
+</div></div>
+<script>
+let stepCount = 0;
+function addStep(title, text, type='info') {{
+  stepCount++;
+  const d = document.getElementById('steps');
+  const s = document.createElement('div'); s.className = 'step';
+  s.innerHTML = '<h3><span class="spinner"></span>Step ' + stepCount + ': ' + title + '</h3><pre class="' + type + '">' + text + '</pre>';
+  d.appendChild(s);
+  s.scrollIntoView({{ behavior: 'smooth', block: 'end' }});
+}}
+function completeStep(title, text) {{
+  const steps = document.getElementById('steps').children;
+  const last = steps[steps.length - 1];
+  if (last) {{
+    last.querySelector('h3').innerHTML = '✅ Step ' + stepCount + ': ' + title;
+    last.querySelector('pre').textContent = text;
+  }}
+}}
+function updateCard(id, val, cls) {{
+  const el = document.getElementById(id);
+  if (el) {{ el.textContent = val; if (cls) el.className = 'value ' + cls; }}
+}}
+</script>
+
+
+</body></html>

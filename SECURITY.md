@@ -9,14 +9,21 @@ This platform is designed for AUTHORIZED testing only. Every network request pas
 3. Resolves DNS immediately before connecting and validates all returned addresses
 4. Revalidates DNS on new connections (DNS rebinding defense)
 5. Blocks loopback, link-local, multicast, CGNAT, private, reserved, and cloud-metadata addresses
-6. Enforces per-host and global rate limits
+6. Enforces per-host rate limits
 7. Fails closed on any ambiguity
+
+HTTPS `CONNECT` tunnels are not supported because they would hide request
+paths and request counts from the enforcement layer. Scanner execution that
+requires CONNECT or a VPN namespace is denied until those controls can be
+enforced by containerized workers.
 
 ## Kill Switches
 
-- **Global kill switch**: `pentest stop` — stops ALL activity across ALL programs
-- **Per-program kill switch**: Stops activity for a specific program only
-- Both are immediate and irreversible without explicit operator action
+- The global/program configuration can start the service with the shared proxy
+  kill switch active.
+- MCP can activate the shared kill switch immediately.
+- Deactivation requires `SCOPEPILOT_DEACTIVATION_TOKEN`; when unset,
+  deactivation fails closed.
 
 ## Agent Containment
 

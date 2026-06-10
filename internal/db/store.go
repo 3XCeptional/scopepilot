@@ -37,6 +37,13 @@ type Store interface {
 	Close() error
 }
 
+// StoreConfig selects the storage backend.
+type StoreConfig struct {
+	PostgreSQLEnabled bool
+	ConnString        string
+	MaxConns          int32
+}
+
 // MemoryStore is an in-memory Store implementation.
 // It wraps audit.Logger internally but exposes a Store interface.
 type MemoryStore struct {

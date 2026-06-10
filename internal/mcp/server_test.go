@@ -1,9 +1,11 @@
 package mcp
 
 import (
+	"context"
 	"bytes"
 	"encoding/json"
 	"fmt"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/dhiren/pentest-automation/internal/proxy"
 	"github.com/dhiren/pentest-automation/internal/ratelimit"
 	"github.com/dhiren/pentest-automation/internal/scope"
+	"github.com/dhiren/pentest-automation/internal/specialist"
 )
 
 // testScopeConfig returns a minimal scope config for testing.
@@ -70,6 +73,7 @@ func TestListTools_ReturnsExpectedTools(t *testing.T) {
 		"get_scope_status":       false,
 		"check_url":              false,
 		"get_audit_log":          false,
+		"get_recent_decisions":   false,
 		"get_ratelimit_status":   false,
 		"activate_kill_switch":   false,
 		"deactivate_kill_switch": false,
@@ -111,7 +115,7 @@ func TestListTools_ReturnsExpectedTools(t *testing.T) {
 
 func TestCallTool_GetScopeStatus(t *testing.T) {
 	srv := testServer()
-	result, err := srv.CallTool("get_scope_status", map[string]interface{}{})
+	result, err := srv.CallToolContext(context.Background(), "get_scope_status", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -140,8 +144,11 @@ func TestCallTool_GetScopeStatus(t *testing.T) {
 }
 
 func TestCallTool_CheckURL_Allowed(t *testing.T) {
+	if _, err := net.LookupHost("example.com"); err != nil {
+		t.Skipf("DNS resolution failed: %v", err)
+	}
 	srv := testServer()
-	result, err := srv.CallTool("check_url", map[string]interface{}{
+	result, err := srv.CallToolContext(context.Background(), "check_url", map[string]interface{}{
 		"url": "https://example.com/page",
 	})
 	if err != nil {
@@ -165,7 +172,7 @@ func TestCallTool_CheckURL_BlockedIP(t *testing.T) {
 	srv := testServer()
 
 	// 127.0.0.1 is a blocked IP.
-	result, err := srv.CallTool("check_url", map[string]interface{}{
+	result, err := srv.CallToolContext(context.Background(), "check_url", map[string]interface{}{
 		"url": "https://127.0.0.1/admin",
 	})
 	if err != nil {
@@ -189,7 +196,7 @@ func TestCallTool_CheckURL_DeniedScheme(t *testing.T) {
 	srv := testServer()
 
 	// HTTP is not in the allowed schemes.
-	result, err := srv.CallTool("check_url", map[string]interface{}{
+	result, err := srv.CallToolContext(context.Background(), "check_url", map[string]interface{}{
 		"url": "http://example.com/page",
 	})
 	if err != nil {
@@ -215,7 +222,7 @@ func TestCallTool_CheckURL_OutOfScope(t *testing.T) {
 	// Not in scope. Use an IP-based URL that's not blocked and not in scope.
 	// 93.184.216.34 is example.com's IP but it's not in our scope CIDR rules.
 	// The result should be allowed=false since the IP doesn't match any CIDR rule.
-	result, err := srv.CallTool("check_url", map[string]interface{}{
+	result, err := srv.CallToolContext(context.Background(), "check_url", map[string]interface{}{
 		"url": "https://93.184.216.34/",
 	})
 	if err != nil {
@@ -241,11 +248,11 @@ func TestCallTool_GetAuditLog(t *testing.T) {
 	srv := testServer()
 
 	// Call tools first to generate audit entries.
-	_, _ = srv.CallTool("get_scope_status", map[string]interface{}{})
-	_, _ = srv.CallTool("is_kill_switch_active", map[string]interface{}{})
+	_, _ = srv.CallToolContext(context.Background(), "get_scope_status", map[string]interface{}{})
+	_, _ = srv.CallToolContext(context.Background(), "is_kill_switch_active", map[string]interface{}{})
 
 	// Now get audit log.
-	result, err := srv.CallTool("get_audit_log", map[string]interface{}{})
+	result, err := srv.CallToolContext(context.Background(), "get_audit_log", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -260,7 +267,7 @@ func TestCallTool_GetAuditLog(t *testing.T) {
 	}
 
 	// Filter by event type.
-	result2, err := srv.CallTool("get_audit_log", map[string]interface{}{
+	result2, err := srv.CallToolContext(context.Background(), "get_audit_log", map[string]interface{}{
 		"event_type": "tool_invocation",
 	})
 	if err != nil {
@@ -283,7 +290,7 @@ func TestCallTool_GetAuditLog(t *testing.T) {
 
 func TestCallTool_GetRateLimitStatus(t *testing.T) {
 	srv := testServer()
-	result, err := srv.CallTool("get_ratelimit_status", map[string]interface{}{})
+	result, err := srv.CallToolContext(context.Background(), "get_ratelimit_status", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -298,8 +305,11 @@ func TestCallTool_GetRateLimitStatus(t *testing.T) {
 }
 
 func TestCallTool_RunSafeCheck(t *testing.T) {
+	if _, err := net.LookupHost("example.com"); err != nil {
+		t.Skipf("DNS resolution failed: %v", err)
+	}
 	srv := testServer()
-	result, err := srv.CallTool("run_safe_check", map[string]interface{}{
+	result, err := srv.CallToolContext(context.Background(), "run_safe_check", map[string]interface{}{
 		"urls": []interface{}{
 			"https://example.com/",
 			"https://127.0.0.1/",
@@ -342,6 +352,16 @@ func TestCallTool_RunSafeCheck(t *testing.T) {
 	}
 }
 
+func TestCallTool_RunSafeCheckRejectsInvalidElements(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "run_safe_check", map[string]interface{}{
+		"urls": []interface{}{"https://example.com/", 123},
+	})
+	if err == nil || !strings.Contains(err.Error(), "strings") {
+		t.Fatalf("expected invalid URL element error, got %v", err)
+	}
+}
+
 // ---------------------------------------------------------------------------
 // CallTool — kill switch flow
 // ---------------------------------------------------------------------------
@@ -350,7 +370,7 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 	srv := testServer()
 
 	// Initially inactive.
-	result, err := srv.CallTool("is_kill_switch_active", map[string]interface{}{})
+	result, err := srv.CallToolContext(context.Background(), "is_kill_switch_active", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -363,7 +383,7 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 	}
 
 	// Activate.
-	result, err = srv.CallTool("activate_kill_switch", map[string]interface{}{
+	result, err = srv.CallToolContext(context.Background(), "activate_kill_switch", map[string]interface{}{
 		"reason": "testing kill switch",
 	})
 	if err != nil {
@@ -384,7 +404,7 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 	}
 
 	// Verify via is_kill_switch_active.
-	result, err = srv.CallTool("is_kill_switch_active", map[string]interface{}{})
+	result, err = srv.CallToolContext(context.Background(), "is_kill_switch_active", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -394,7 +414,7 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 	}
 
 	// Deactivate.
-	result, err = srv.CallTool("deactivate_kill_switch", map[string]interface{}{
+	result, err = srv.CallToolContext(context.Background(), "deactivate_kill_switch", map[string]interface{}{
 		"token": "test-token-123",
 	})
 	if err != nil {
@@ -406,7 +426,7 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 	}
 
 	// Verify via is_kill_switch_active.
-	result, err = srv.CallTool("is_kill_switch_active", map[string]interface{}{})
+	result, err = srv.CallToolContext(context.Background(), "is_kill_switch_active", map[string]interface{}{})
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -422,7 +442,7 @@ func TestCallTool_KillSwitchActivateDeactivate(t *testing.T) {
 
 func TestCallTool_UnknownToolName(t *testing.T) {
 	srv := testServer()
-	_, err := srv.CallTool("non_existent_tool", map[string]interface{}{})
+	_, err := srv.CallToolContext(context.Background(), "non_existent_tool", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for unknown tool, got nil")
 	}
@@ -435,7 +455,7 @@ func TestCallTool_MissingRequiredParams(t *testing.T) {
 	srv := testServer()
 
 	// check_url requires 'url'.
-	_, err := srv.CallTool("check_url", map[string]interface{}{})
+	_, err := srv.CallToolContext(context.Background(), "check_url", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for missing required param, got nil")
 	}
@@ -444,7 +464,7 @@ func TestCallTool_MissingRequiredParams(t *testing.T) {
 	}
 
 	// activate_kill_switch requires 'reason'.
-	_, err = srv.CallTool("activate_kill_switch", map[string]interface{}{})
+	_, err = srv.CallToolContext(context.Background(), "activate_kill_switch", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for missing required param, got nil")
 	}
@@ -453,7 +473,7 @@ func TestCallTool_MissingRequiredParams(t *testing.T) {
 	}
 
 	// run_safe_check requires 'urls'.
-	_, err = srv.CallTool("run_safe_check", map[string]interface{}{})
+	_, err = srv.CallToolContext(context.Background(), "run_safe_check", map[string]interface{}{})
 	if err == nil {
 		t.Fatal("expected error for missing required param, got nil")
 	}
@@ -466,7 +486,7 @@ func TestCallTool_UnknownFields_Rejected(t *testing.T) {
 	srv := testServer()
 
 	// get_scope_status schema has additionalProperties=false.
-	_, err := srv.CallTool("get_scope_status", map[string]interface{}{
+	_, err := srv.CallToolContext(context.Background(), "get_scope_status", map[string]interface{}{
 		"unknown_field": "should be rejected",
 	})
 	if err == nil {
@@ -488,12 +508,12 @@ func TestCallTool_AuditLogging(t *testing.T) {
 	srv := NewServer(prx, store, ks)
 
 	// Perform a series of tool calls.
-	_, _ = srv.CallTool("get_scope_status", map[string]interface{}{})
-	_, _ = srv.CallTool("is_kill_switch_active", map[string]interface{}{})
-	_, _ = srv.CallTool("check_url", map[string]interface{}{
+	_, _ = srv.CallToolContext(context.Background(), "get_scope_status", map[string]interface{}{})
+	_, _ = srv.CallToolContext(context.Background(), "is_kill_switch_active", map[string]interface{}{})
+	_, _ = srv.CallToolContext(context.Background(), "check_url", map[string]interface{}{
 		"url": "https://example.com/",
 	})
-	_, _ = srv.CallTool("activate_kill_switch", map[string]interface{}{
+	_, _ = srv.CallToolContext(context.Background(), "activate_kill_switch", map[string]interface{}{
 		"reason": "emergency test",
 	})
 
@@ -520,6 +540,103 @@ func TestCallTool_AuditLogging(t *testing.T) {
 	reason, _ := lastKS.Data["reason"].(string)
 	if reason != "emergency test" {
 		t.Errorf("expected reason 'emergency test', got %q", reason)
+	}
+}
+
+func TestCallTool_AuditRedactsSecrets(t *testing.T) {
+	store := db.NewMemoryStore(100)
+	srv := NewServer(testProxy(), store, &killswitch.Switch{})
+	srv.SetDeactivationToken("expected-token")
+
+	_, _ = srv.CallToolContext(context.Background(), "deactivate_kill_switch", map[string]interface{}{
+		"token": "wrong-secret-token",
+	})
+
+	entries := store.SearchEntries("tool_invocation", "mcp")
+	if len(entries) != 1 {
+		t.Fatalf("expected one tool invocation, got %d", len(entries))
+	}
+	params, ok := entries[0].Data["params"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected params map, got %T", entries[0].Data["params"])
+	}
+	if params["token"] != "[REDACTED]" {
+		t.Fatalf("expected token redaction, got %v", params["token"])
+	}
+}
+
+func TestDashboardDoesNotExposeAPIKey(t *testing.T) {
+	srv := testServer()
+	srv.SetAPIKey("server-secret-api-key")
+
+	req := httptest.NewRequest(http.MethodGet, "/dashboard", nil)
+	w := httptest.NewRecorder()
+	srv.Dashboard().ServeHTTP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", w.Code)
+	}
+	if strings.Contains(w.Body.String(), "server-secret-api-key") {
+		t.Fatal("dashboard exposed the MCP API key")
+	}
+	if got := w.Header().Get("Cache-Control"); got != "no-store" {
+		t.Fatalf("expected Cache-Control no-store, got %q", got)
+	}
+	if got := w.Header().Get("X-Content-Type-Options"); got != "nosniff" {
+		t.Fatalf("expected nosniff header, got %q", got)
+	}
+}
+
+func TestSpecialistToolsRequireRegistration(t *testing.T) {
+	srv := testServer()
+	if _, err := srv.CallToolContext(context.Background(), "run_recon_specialist", map[string]interface{}{
+		"targets": []interface{}{"app.example.com"},
+	}); err == nil {
+		t.Fatal("expected unregistered specialist tool to be unavailable")
+	}
+
+	srv.ConfigureSpecialists(specialist.Config{
+		MCPURL:    "http://127.0.0.1:9090",
+		ProxyURL:  "http://127.0.0.1:8443",
+		DryRun:    true,
+		ProgramID: "test-program-1",
+	})
+
+	got := map[string]bool{}
+	for _, tool := range srv.ListTools() {
+		got[tool.Name] = true
+	}
+	for _, name := range []string{"run_recon_specialist", "run_vuln_specialist", "run_gate_specialist"} {
+		if !got[name] {
+			t.Fatalf("registered tool %q missing from list_tools", name)
+		}
+	}
+}
+
+func TestSpecialistExecutionBlockedByKillSwitch(t *testing.T) {
+	srv := testServer()
+	srv.ConfigureSpecialists(specialist.Config{DryRun: true})
+	srv.ks.Activate("test")
+
+	_, err := srv.CallToolContext(context.Background(), "run_recon_specialist", map[string]interface{}{
+		"targets": []interface{}{"app.example.com"},
+	})
+	if err == nil || !strings.Contains(err.Error(), "kill switch") {
+		t.Fatalf("expected kill-switch denial, got %v", err)
+	}
+}
+
+func TestGateSpecialistRequiresApprovalToken(t *testing.T) {
+	srv := testServer()
+	srv.ConfigureSpecialists(specialist.Config{DryRun: true})
+	srv.SetGateApprovalToken("operator-approved-token")
+
+	_, err := srv.CallToolContext(context.Background(), "run_gate_specialist", map[string]interface{}{
+		"targets":        []interface{}{"app.example.com"},
+		"approval_token": "wrong-token",
+	})
+	if err == nil || !strings.Contains(err.Error(), "approval") {
+		t.Fatalf("expected approval denial, got %v", err)
 	}
 }
 
@@ -561,8 +678,8 @@ func TestHTTPServeHTTP_ListTools(t *testing.T) {
 	if resp.ID != 1 {
 		t.Errorf("expected id 1, got %v", resp.ID)
 	}
-	if len(resp.Result) != 8 {
-		t.Errorf("expected 8 tools, got %d", len(resp.Result))
+	if len(resp.Result) != 9 {
+		t.Errorf("expected 9 tools, got %d", len(resp.Result))
 	}
 }
 
@@ -698,3 +815,29 @@ var _ = fmt.Sprintf("%T", &ratelimit.PerHostLimiter{})
 var _ = fmt.Sprintf("%T", &proxy.CheckResult{})
 var _ = fmt.Sprintf("%T", proxy.ScopeSummary{})
 var _ = fmt.Sprintf("%T", &proxy.RateLimitState{})
+
+func TestJSONRPC_DirectToolNameMethod(t *testing.T) {
+	srv := testServer()
+	for _, method := range []string{"get_scope_status", "tools/call", "tools/list"} {
+		body := map[string]interface{}{"jsonrpc": "2.0", "id": 1, "method": method}
+		if method == "tools/call" {
+			body["params"] = map[string]interface{}{"name": "get_scope_status", "arguments": map[string]interface{}{}}
+		}
+		b, _ := json.Marshal(body)
+		req := httptest.NewRequest("POST", "/mcp", bytes.NewReader(b))
+		req.Header.Set("Content-Type", "application/json")
+		if srv.apiKey != "" {
+			req.Header.Set("Authorization", "Bearer "+srv.apiKey)
+		}
+		w := httptest.NewRecorder()
+		srv.ServeHTTP(w, req)
+		var resp map[string]interface{}
+		_ = json.Unmarshal(w.Body.Bytes(), &resp)
+		if resp["error"] != nil {
+			t.Fatalf("method %q returned error: %v", method, resp["error"])
+		}
+		if resp["result"] == nil {
+			t.Fatalf("method %q returned no result", method)
+		}
+	}
+}
