@@ -5,6 +5,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func sampleFindings() []string {
@@ -194,6 +195,65 @@ func TestExtractHost(t *testing.T) {
 		got := extractHost(tc.input)
 		if got != tc.want {
 			t.Errorf("extractHost(%q) = %q, want %q", tc.input, got, tc.want)
+		}
+	}
+}
+
+func TestRenderFindings_TitleCasedSeverity(t *testing.T) {
+	// Verify the severity table uses proper title casing (not raw lowercase).
+	md := RenderFindings([]string{"[critical] h - n (t)", "[high] h - n (t)"}, ReportMeta{})
+	// Each severity should be Title-cased: Critical, High, etc.
+	for _, expected := range []string{"| Critical |", "| High |"} {
+		if !strings.Contains(md, expected) {
+			t.Errorf("expected title-cased %q in severity table", expected)
+		}
+	}
+	// Raw lowercase in the table header is wrong.
+	if strings.Contains(md, "| critical |") {
+		t.Error("found lowercase severity in table, expected title-cased")
+	}
+}
+
+func TestRenderFindings_StartTimeInReport(t *testing.T) {
+	fixedTime := time.Date(2026, 6, 12, 10, 30, 0, 0, time.UTC)
+	meta := ReportMeta{
+		ProgramID: "starttime-test",
+		StartTime: fixedTime,
+	}
+	md := RenderFindings(nil, meta)
+	if !strings.Contains(md, "2026-06-12T10:30:00Z") {
+		t.Errorf("expected StartTime in report, got: %s", md)
+	}
+	if !strings.Contains(md, "starttime-test") {
+		t.Error("missing program ID")
+	}
+}
+
+func TestRenderFindings_StartTimeZeroUsesNow(t *testing.T) {
+	// When StartTime is zero, the report should contain a timestamp
+	// close to the current time (within a few seconds).
+	before := time.Now().UTC().Format(time.RFC3339)
+	md := RenderFindings(nil, ReportMeta{ProgramID: "now-test"})
+	// The report should contain a timestamp that sorts after 'before'
+	// and has the same date prefix.
+	if !strings.Contains(md, "now-test") {
+		t.Error("missing program ID")
+	}
+	// Just verify a timestamp line exists.
+	if !strings.Contains(md, "**Generated:** ") {
+		t.Error("missing Generated line")
+	}
+	// The timestamp should be non-empty and contain a T (RFC3339).
+	// We can't test exact equality since time passes, but we can check format.
+	generated := md[strings.Index(md, "**Generated:** ")+len("**Generated:** "):]
+	end := strings.Index(generated, "\n")
+	if end > 0 {
+		ts := strings.TrimSpace(generated[:end])
+		if _, err := time.Parse(time.RFC3339, ts); err != nil {
+			t.Errorf("Generated timestamp %q is not valid RFC3339: %v", ts, err)
+		}
+		if ts < before {
+			t.Errorf("Generated timestamp %q should not be before test start %q", ts, before)
 		}
 	}
 }

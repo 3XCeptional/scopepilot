@@ -9,6 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"golang.org/x/text/cases"
+	"golang.org/x/text/language"
 )
 
 // ReportMeta describes the scan that produced the findings.
@@ -19,6 +22,7 @@ type ReportMeta struct {
 	Targets     []string
 	Duration    string // human-readable
 	DryRun      bool
+	StartTime   time.Time // when the scan started; zero value means use time.Now()
 }
 
 // RenderFindings produces a Markdown string from raw findings and metadata.
@@ -34,7 +38,11 @@ func RenderFindings(findings []string, meta ReportMeta) string {
 	b.WriteString("\n\n")
 
 	b.WriteString("**Generated:** ")
-	b.WriteString(time.Now().UTC().Format(time.RFC3339))
+	if !meta.StartTime.IsZero() {
+		b.WriteString(meta.StartTime.UTC().Format(time.RFC3339))
+	} else {
+		b.WriteString(time.Now().UTC().Format(time.RFC3339))
+	}
 	b.WriteString("\n\n")
 
 	if meta.Tool != "" {
@@ -74,8 +82,10 @@ func RenderFindings(findings []string, meta ReportMeta) string {
 	b.WriteString("## Severity Distribution\n\n")
 	b.WriteString("| Severity | Count |\n")
 	b.WriteString("|----------|-------|\n")
+	// Build a title-caser once. Replaces deprecated strings.Title.
+	titleCaser := cases.Title(language.Und, cases.NoLower)
 	for _, sev := range []string{"critical", "high", "medium", "low", "info", "unknown"} {
-		fmt.Fprintf(&b, "| %s | %d |\n", strings.Title(sev), sevCount[sev])
+		fmt.Fprintf(&b, "| %s | %d |\n", titleCaser.String(sev), sevCount[sev])
 	}
 	b.WriteString("\n")
 
