@@ -329,3 +329,36 @@ func TestWildcardApex_ExcludeStillWorks(t *testing.T) {
 		t.Error("internal.example.com should be out of scope despite IncludeApex")
 	}
 }
+
+func TestIsURLInScope_InvalidPort(t *testing.T) {
+	engine := NewEngine("test", makeScopeConfig(
+		[]config.ScopeRule{
+			{Type: "exact_host", Value: "app.example.com"},
+		},
+		[]config.ScopeRule{},
+	))
+	allowedSchemes := []string{"https"}
+	allowedPorts := []int{443}
+
+	// Malformed port strings should be rejected, not silently parsed
+	t.Run("malformed port '443abc' is denied", func(t *testing.T) {
+		dec := engine.IsURLInScope("https://app.example.com:443abc/test", allowedSchemes, allowedPorts)
+		if dec.InScope {
+			t.Errorf("expected denied for malformed port, got in-scope: %s", dec.Reason)
+		}
+	})
+
+	t.Run("out of range port '99999' is denied", func(t *testing.T) {
+		dec := engine.IsURLInScope("https://app.example.com:99999/test", allowedSchemes, allowedPorts)
+		if dec.InScope {
+			t.Errorf("expected denied for out-of-range port, got in-scope: %s", dec.Reason)
+		}
+	})
+
+	t.Run("valid port 443 is allowed", func(t *testing.T) {
+		dec := engine.IsURLInScope("https://app.example.com/test", allowedSchemes, allowedPorts)
+		if !dec.InScope {
+			t.Errorf("expected allowed for port 443, got denied: %s", dec.Reason)
+		}
+	})
+}

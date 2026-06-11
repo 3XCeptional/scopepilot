@@ -111,7 +111,10 @@ func (e *Engine) IsURLInScope(rawURL string, allowedSchemes []string, allowedPor
 			portInt = 80
 		}
 	} else {
-		fmt.Sscanf(port, "%d", &portInt)
+		n, err := fmt.Sscanf(port, "%d", &portInt)
+		if n != 1 || err != nil || portInt <= 0 || portInt > 65535 {
+			return Decision{InScope: false, Reason: fmt.Sprintf("invalid port %q", port)}
+		}
 	}
 	portOk := false
 	for _, p := range allowedPorts {
