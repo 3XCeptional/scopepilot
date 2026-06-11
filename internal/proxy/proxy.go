@@ -41,6 +41,7 @@ type Config struct {
 	AllowedPorts         []int
 	DryRun               bool
 	ActiveTestingEnabled bool
+	PersistentAudit      *audit.PersistentLogger // optional SQLite-backed audit
 }
 
 // Proxy is the scope enforcement HTTP gateway. It embeds all safety components
@@ -100,10 +101,14 @@ func (p *Proxy) SetDialOverride(fn func(network, addr string, timeout time.Durat
 
 // NewProxy creates a new Proxy from the given Config.
 func NewProxy(cfg Config) *Proxy {
+	auditLogger := audit.NewLogger(10000)
+	if cfg.PersistentAudit != nil {
+		auditLogger = cfg.PersistentAudit.Logger
+	}
 	p := &Proxy{
 		Engine:         scope.NewEngine(cfg.ProgramID, cfg.ScopeCfg),
 		PerHostLimiter: ratelimit.NewPerHostLimiter(cfg.Limits.RequestsPerSecondPerHost, cfg.Limits.RequestsPerSecondPerHost),
-		Logger:         audit.NewLogger(10000),
+		Logger:         auditLogger,
 		Switch:         &killswitch.Switch{},
 		Config:         cfg,
 		lookupHostFn:   net.DefaultResolver.LookupHost,
