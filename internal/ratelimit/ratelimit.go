@@ -106,6 +106,33 @@ func (l *PerHostLimiter) AllowN(host string, n int) bool {
 	return false
 }
 
+// HostSnapshot contains rate-limit state for a single host.
+type HostSnapshot struct {
+	Host          string  `json:"host"`
+	Tokens        float64 `json:"tokens"`
+	Capacity      int     `json:"capacity"`
+	RatePerSecond float64 `json:"rate_per_second"`
+}
+
+// Snapshot returns a slice of per-host state read under the limiter's lock.
+func (l *PerHostLimiter) Snapshot() []HostSnapshot {
+	l.mu.RLock()
+	defer l.mu.RUnlock()
+
+	states := make([]HostSnapshot, 0, len(l.buckets))
+	for host, tb := range l.buckets {
+		tb.mu.Lock()
+		states = append(states, HostSnapshot{
+			Host:          host,
+			Tokens:        tb.tokens,
+			Capacity:      tb.capacity,
+			RatePerSecond: tb.rate,
+		})
+		tb.mu.Unlock()
+	}
+	return states
+}
+
 // getOrCreateBucket returns the token bucket for the given host, creating
 // one if it does not exist.
 func (l *PerHostLimiter) getOrCreateBucket(host string) *tokenBucket {

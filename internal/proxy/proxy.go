@@ -1295,12 +1295,19 @@ func (p *Proxy) ScopeSummary() ScopeSummary {
 	}
 }
 
-// RateLimitStatus returns a snapshot of the current rate limiter state.
-// Note: the underlying PerHostLimiter does not expose its internal bucket
-// map, so this returns an empty host list. Extend PerHostLimiter if full
-// introspection is needed.
+// RateLimitStatus provides a snapshot of the current rate limiter.
 func (p *Proxy) RateLimitStatus() *RateLimitState {
+	snapshots := p.PerHostLimiter.Snapshot()
+	hosts := make([]HostState, len(snapshots))
+	for i, s := range snapshots {
+		hosts[i] = HostState{
+			Host:          s.Host,
+			Tokens:        s.Tokens,
+			Capacity:      s.Capacity,
+			RatePerSecond: s.RatePerSecond,
+		}
+	}
 	return &RateLimitState{
-		Hosts: []HostState{},
+		Hosts: hosts,
 	}
 }

@@ -231,3 +231,61 @@ func TestTokenBucket_ConcurrentAccess(t *testing.T) {
 	}
 	wg.Wait()
 }
+
+func TestPerHostLimiter_Snapshot(t *testing.T) {
+	lim := NewPerHostLimiter(5, 10)
+
+	lim.Allow("host-a")
+	lim.Allow("host-a")
+	lim.Allow("host-b")
+
+	snap := lim.Snapshot()
+
+	if len(snap) != 2 {
+		t.Fatalf("expected 2 hosts in snapshot, got %d", len(snap))
+	}
+
+	seen := map[string]bool{}
+	for _, hs := range snap {
+		seen[hs.Host] = true
+		if hs.Capacity != 10 {
+			t.Errorf("host %s: expected capacity 10, got %d", hs.Host, hs.Capacity)
+		}
+		if hs.RatePerSecond != 5 {
+			t.Errorf("host %s: expected rate 5, got %f", hs.Host, hs.RatePerSecond)
+		}
+		if hs.Tokens < 0 || hs.Tokens > float64(hs.Capacity) {
+			t.Errorf("host %s: tokens %.1f out of range [0, %d]", hs.Host, hs.Tokens, hs.Capacity)
+		}
+	}
+	if !seen["host-a"] {
+		t.Error("expected host-a in snapshot")
+	}
+	if !seen["host-b"] {
+		t.Error("expected host-b in snapshot")
+	}
+}
+
+func TestPerHostLimiter_Snapshot_TokensDecremented(t *testing.T) {
+	lim := NewPerHostLimiter(10, 20)
+
+	lim.Allow("test-host")
+	before := lim.Snapshot()
+	var bTokens float64
+	for _, hs := range before {
+		if hs.Host == "test-host" {
+			bTokens = hs.Tokens
+		}
+	}
+
+	lim.Allow("test-host")
+
+	after := lim.Snapshot()
+	for _, hs := range after {
+		if hs.Host == "test-host" {
+			if hs.Tokens >= bTokens {
+				t.Errorf("expected tokens to decrease after Allow: before=%f after=%f", bTokens, hs.Tokens)
+			}
+		}
+	}
+}
