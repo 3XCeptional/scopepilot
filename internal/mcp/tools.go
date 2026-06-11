@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
+	"github.com/dhiren/pentest-automation/internal/config"
 	"github.com/dhiren/pentest-automation/internal/db"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/proxy"
@@ -842,7 +843,41 @@ func (s *Server) handleRunSpecialist(ctx context.Context, name string, params ma
 		cfg.AllowExploitation = true
 	}
 
+	// Short-circuit passive recon for exact_host-only scope.
+	if name == "run_recon_specialist" {
+		rules := s.prx.IncludeRules()
+		if exactHostOnlyScope(rules) {
+			kh := make([]interface{}, len(targets))
+			for i, t := range targets {
+				kh[i] = t
+			}
+			return map[string]interface{}{
+				"specialist":   "recon",
+				"status":       "skipped",
+				"note":         "scope has no wildcards, passive subdomain enumeration skipped",
+				"known_hosts":  kh,
+				"targets_in":   len(targets),
+				"targets_pass": len(targets),
+			}, nil
+		}
+	}
+
 	return runner.Run(ctx, targets, cfg)
+}
+
+// exactHostOnlyScope returns true if the program's include rules contain
+// only exact_host (no wildcards, no CIDR). Used to skip passive subdomain
+// enumeration when it would add no value.
+func exactHostOnlyScope(rules []config.ScopeRule) bool {
+	if len(rules) == 0 {
+		return false
+	}
+	for _, r := range rules {
+		if r.Type != "exact_host" {
+			return false
+		}
+	}
+	return true
 }
 
 func specialistTargets(raw interface{}) ([]string, error) {

@@ -1349,3 +1349,41 @@ func TestJSONRPC_DirectToolNameMethod(t *testing.T) {
 		}
 	}
 }
+
+func TestCallTool_RunRecon_ExactHostScope_SkipsBBOT(t *testing.T) {
+	prx := proxy.NewProxy(proxy.Config{
+		ProgramID:            "test-exact-recon",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{
+				{Type: "exact_host", Value: "app.example.com"},
+				{Type: "exact_host", Value: "api.example.com"},
+			},
+		},
+	})
+	srv := NewServer(prx, db.NewMemoryStore(100), &killswitch.Switch{})
+	srv.ConfigureSpecialists(specialist.Config{})
+	result, err := srv.CallToolContext(context.Background(), "run_recon_specialist", map[string]interface{}{
+		"targets": []interface{}{"app.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if s, _ := r["status"].(string); s != "skipped" {
+		t.Errorf("expected status skipped, got %v", s)
+	}
+	note, _ := r["note"].(string)
+	if note == "" {
+		t.Error("expected non-empty skip note")
+	}
+	kh, _ := r["known_hosts"].([]interface{})
+	if len(kh) == 0 {
+		t.Error("expected known_hosts to include targets")
+	}
+}
