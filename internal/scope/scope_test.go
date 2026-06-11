@@ -134,6 +134,10 @@ func TestBlockedIPs(t *testing.T) {
 		"::1",
 		"fe80::1",
 		"fd00::1", "fc00::1",
+		"::ffff:10.0.0.1",
+		"::ffff:127.0.0.1",
+		"::ffff:192.168.1.1",
+		"::ffff:169.254.169.254",
 	}
 
 	for _, ipStr := range blocked {
