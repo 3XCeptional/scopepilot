@@ -15,7 +15,7 @@ func TestBBOTArgs(t *testing.T) {
 	targets := []string{"example.com", "test.com"}
 	proxyURL := "http://127.0.0.1:8443"
 
-	args := bbotArgs(targets, proxyURL, false)
+	args := bbotArgs(targets, proxyURL, false, 2)
 
 	// Verify targets
 	foundTargets := false
@@ -67,7 +67,7 @@ func TestNucleiArgs(t *testing.T) {
 	templateDir := "/templates"
 	targets := []string{"example.com", "test.com"}
 
-	args := nucleiArgs(templateDir, targets, "/tmp/test_output.jsonl")
+	args := nucleiArgs(templateDir, targets, "/tmp/test_output.jsonl", 3)
 
 	// Verify -jsonl present (not deprecated -json)
 	hasJSONL := false
@@ -137,7 +137,7 @@ func TestParseMajorVersion(t *testing.T) {
 }
 
 func TestBBOTArgsNoDeprecatedFlags(t *testing.T) {
-	args := bbotArgs([]string{"x.com"}, "http://proxy:8080", false)
+	args := bbotArgs([]string{"x.com"}, "http://proxy:8080", false, 2)
 	argStr := strings.Join(args, " ")
 	deprecated := []string{"--passive-only", "--no-dns", "--no-www"}
 	for _, d := range deprecated {
@@ -148,7 +148,7 @@ func TestBBOTArgsNoDeprecatedFlags(t *testing.T) {
 }
 
 func TestNucleiArgsNoDeprecatedFlags(t *testing.T) {
-	args := nucleiArgs("/templates", []string{"x.com"}, "/tmp/test.jsonl")
+	args := nucleiArgs("/templates", []string{"x.com"}, "/tmp/test.jsonl", 3)
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "-json ") {
 		t.Errorf("nuclei args contain deprecated -json flag: %s", args)
@@ -158,16 +158,73 @@ func TestNucleiArgsNoDeprecatedFlags(t *testing.T) {
 func TestNucleiArgsNoHardcodedTmp(t *testing.T) {
 	// RunNuclei now uses os.CreateTemp for a unique, per-run path.
 	// Verify nucleiArgs does NOT contain a bare /tmp/ path.
-	args := nucleiArgs("/t", []string{"h.com"}, "/tmp/scopepilot_nuclei_out.jsonl")
+	args := nucleiArgs("/t", []string{"h.com"}, "/tmp/scopepilot_nuclei_out.jsonl", 3)
 	argStr := strings.Join(args, " ")
 	if !strings.Contains(argStr, "/tmp/") {
 		t.Error("expected /tmp/ in args (test uses /tmp path), but check that it's the param not hardcoded")
 	}
 	// Now verify with a non-/tmp path to confirm the param is used.
-	args2 := nucleiArgs("/t", []string{"h.com"}, filepath.Join(t.TempDir(), "out.jsonl"))
+	args2 := nucleiArgs("/t", []string{"h.com"}, filepath.Join(t.TempDir(), "out.jsonl"), 3)
 	argStr2 := strings.Join(args2, " ")
 	if strings.Contains(argStr2, "/tmp/scopepilot") {
 		t.Error("nucleiArgs still contains hardcoded /tmp/scopepilot path: " + argStr2)
+	}
+}
+
+func TestBBOTArgs_Version1(t *testing.T) {
+	targets := []string{"x.com"}
+	args := bbotArgs(targets, "http://proxy:8080", false, 1)
+	argStr := strings.Join(args, " ")
+	// v1 should use deprecated flags
+	for _, want := range []string{"--passive-only", "--no-dns", "--no-www", "--force", "-o", "json"} {
+		if !strings.Contains(argStr, want) {
+			t.Errorf("bbotArgs(v1): expected %q in args: %s", want, argStr)
+		}
+	}
+	// v1 should NOT have v2-only flags
+	for _, bad := range []string{"-rf", "-om"} {
+		if strings.Contains(argStr, bad) {
+			t.Errorf("bbotArgs(v1): unexpected v2 flag %q in v1 args: %s", bad, argStr)
+		}
+	}
+}
+
+func TestBBOTArgs_Version0(t *testing.T) {
+	// unknown version (0) should default to v2 (current) flags
+	args := bbotArgs([]string{"x.com"}, "http://proxy:8080", false, 0)
+	argStr := strings.Join(args, " ")
+	if !strings.Contains(argStr, "-rf") {
+		t.Errorf("bbotArgs(v0): expected v2 flag -rf for unknown version: %s", argStr)
+	}
+	// hard assert no v1 deprecated flags
+	for _, bad := range []string{"--passive-only", "--no-dns", "--no-www"} {
+		if strings.Contains(argStr, bad) {
+			t.Errorf("bbotArgs(v0): unexpected v1 flag %q: %s", bad, argStr)
+		}
+	}
+}
+
+func TestNucleiArgs_Version2(t *testing.T) {
+	args := nucleiArgs("/t", []string{"h.com"}, "/tmp/o.jsonl", 2)
+	argStr := strings.Join(args, " ")
+	// v2 should use -json not -jsonl
+	if !strings.Contains(argStr, "-json ") {
+		t.Errorf("nucleiArgs(v2): expected -json flag for v2: %s", argStr)
+	}
+	if strings.Contains(argStr, "-jsonl") {
+		t.Errorf("nucleiArgs(v2): unexpected -jsonl flag in v2 args: %s", argStr)
+	}
+}
+
+func TestNucleiArgs_Version0(t *testing.T) {
+	// unknown version (0) should default to v3 (current) flags
+	args := nucleiArgs("/t", []string{"h.com"}, "/tmp/o.jsonl", 0)
+	argStr := strings.Join(args, " ")
+	if !strings.Contains(argStr, "-jsonl") {
+		t.Errorf("nucleiArgs(v0): expected -jsonl for unknown version: %s", argStr)
+	}
+	if strings.Contains(argStr, "-json ") {
+		t.Errorf("nucleiArgs(v0): unexpected -json flag for unknown version: %s", argStr)
 	}
 }
 

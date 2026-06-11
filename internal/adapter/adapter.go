@@ -303,7 +303,8 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 	}
 
 	// Step 2: Build BBOT command with safe args.
-	cmd := exec.CommandContext(ctx, cfg.BinaryPath, bbotArgs(inScope, cfg.ProxyURL, cfg.NoProxy)...)
+	bbotVersion := detectBBOTVersion(cfg.BinaryPath)
+	cmd := exec.CommandContext(ctx, cfg.BinaryPath, bbotArgs(inScope, cfg.ProxyURL, cfg.NoProxy, bbotVersion)...)
 	if cfg.NoProxy {
 		cmd.Env = os.Environ() // direct internet, no proxy
 	} else {
@@ -413,7 +414,7 @@ func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*Nuclei
 	tmpOut.Close()
 	defer os.Remove(tmpPath)
 
-	args := nucleiArgs(cfg.TemplateDir, inScope, tmpPath)
+	args := nucleiArgs(cfg.TemplateDir, inScope, tmpPath, detectNucleiVersion(cfg.BinaryPath))
 
 	severities := cfg.Severities
 	if len(severities) == 0 {
@@ -540,9 +541,9 @@ func proxyEnvironment(proxyURL string) []string {
 }
 
 // bbotArgs returns the CLI args for a BBOT discovery run, selecting
-// flags appropriate for the detected BBOT version.
-func bbotArgs(targets []string, proxyURL string, noProxy bool) []string {
-	version := detectBBOTVersion("bbot")
+// flags appropriate for the given version. version 0 means unknown
+// (assume current/v2).
+func bbotArgs(targets []string, proxyURL string, noProxy bool, version int) []string {
 	args := []string{
 		"-t", strings.Join(targets, ","),
 		"-y",
@@ -562,10 +563,10 @@ func bbotArgs(targets []string, proxyURL string, noProxy bool) []string {
 }
 
 // nucleiArgs returns the CLI args for a Nuclei scan run, selecting
-// flags appropriate for the detected Nuclei version. outputPath is
-// the file path where nuclei should write JSONL results.
-func nucleiArgs(templateDir string, targets []string, outputPath string) []string {
-	version := detectNucleiVersion("nuclei")
+// flags appropriate for the given version. version 0 means unknown
+// (assume current/v3). outputPath is the file path where nuclei
+// should write JSONL results.
+func nucleiArgs(templateDir string, targets []string, outputPath string, version int) []string {
 	jsonFlag := "-jsonl"
 	if version < 3 && version > 0 {
 		jsonFlag = "-json" // Nuclei v2.x
