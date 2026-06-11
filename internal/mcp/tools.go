@@ -523,16 +523,16 @@ func (s *Server) handleRunSafeCheck(params map[string]interface{}) (map[string]i
 		// than silently dropping it — a skipped element looks identical to a
 		// passed check to the caller, which is exactly the kind of gap this
 		// gate exists to close.
-		s, ok := u.(string)
+		rawURL, ok := u.(string)
 		if !ok {
 			return nil, fmt.Errorf("'urls' must be an array of strings (element %d is %T)", i, u)
 		}
 		// Normalize: ensure URL has a scheme
-		if !strings.Contains(s, "://") {
-			s = "https://" + s
+		if !strings.Contains(rawURL, "://") {
+			rawURL = "https://" + rawURL
 		}
-		if _, err := url.Parse(s); err == nil {
-			urls = append(urls, s)
+		if _, err := url.Parse(rawURL); err == nil {
+			urls = append(urls, rawURL)
 		}
 	}
 
