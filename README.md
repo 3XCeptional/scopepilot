@@ -1,8 +1,8 @@
 # ScopePilot
 
-[![Go](https://github.com/dhiren/pentest-automation/actions/workflows/test.yml/badge.svg)](https://github.com/dhiren/pentest-automation/actions)
-[![Release](https://github.com/dhiren/pentest-automation/actions/workflows/release.yml/badge.svg)](https://github.com/dhiren/pentest-automation/releases)
-[![Go Report Card](https://goreportcard.com/badge/github.com/dhiren/pentest-automation)](https://goreportcard.com/report/github.com/dhiren/pentest-automation)
+[![Go](https://github.com/3XCeptional/pentest-automation/actions/workflows/test.yml/badge.svg)](https://github.com/3XCeptional/pentest-automation/actions)
+[![Release](https://github.com/3XCeptional/pentest-automation/actions/workflows/release.yml/badge.svg)](https://github.com/3XCeptional/pentest-automation/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/3XCeptional/pentest-automation)](https://goreportcard.com/report/github.com/3XCeptional/pentest-automation)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
 > Put ScopePilot in front of your recon tools and you **physically cannot** send
@@ -15,16 +15,16 @@ curl, ffuf, nuclei, httpx, your browser — any tool that speaks HTTP proxy.
 
 ```bash
 # macOS — Homebrew
-brew install dhiren/tap/scopepilot
+brew install 3XCeptional/tap/scopepilot
 
 # Any platform — Go install
-go install github.com/dhiren/pentest-automation/cmd/pentest@latest
+go install github.com/3XCeptional/pentest-automation/cmd/pentest@latest
 
 # Or download a static binary from GitHub Releases
-curl -sSL https://github.com/dhiren/pentest-automation/releases/latest/download/scopepilot_linux_amd64.tar.gz | tar xz
+curl -sSL https://github.com/3XCeptional/pentest-automation/releases/latest/download/scopepilot_linux_amd64.tar.gz | tar xz
 
 # Container — pull the published image from GitHub Container Registry
-podman pull ghcr.io/dhiren/scopepilot:latest
+podman pull ghcr.io/3XCeptional/scopepilot:latest
 ```
 
 **No Docker or Podman required** to run the gate. Single static binary.
@@ -184,7 +184,7 @@ the `build:` block in `compose.yaml` with the `image:` field:
 
 ```yaml
   scopepilot:
-    image: ghcr.io/dhiren/scopepilot:latest
+    image: ghcr.io/3XCeptional/scopepilot:latest
     ports:
       - "127.0.0.1:8443:8443"
       - "127.0.0.1:9090:9090"
