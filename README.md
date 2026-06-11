@@ -41,6 +41,48 @@ curl -sk https://out-of-scope.com        # ❌ 403 — blocked by proxy
 scopepilot watch
 ```
 
+## Use as Upstream Proxy
+
+Set ScopePilot as your upstream proxy in any tool. All traffic is
+scope-gated — out-of-scope requests are blocked with 403 before they leave.
+
+```bash
+# curl / ffuf / httpx / nuclei
+export http_proxy=http://127.0.0.1:8443
+export https_proxy=http://127.0.0.1:8443
+
+# Browser (Firefox)
+# Settings → Network Settings → Manual proxy → HTTP Proxy: 127.0.0.1:8443
+# ✓ Same proxy for HTTPS
+
+# Browser (Chrome)
+# Settings → System → Open proxy settings → HTTP Proxy: 127.0.0.1:8443
+
+# Burp Suite
+# Proxy → Options → Upstream Proxy Server → 127.0.0.1:8443
+
+# ZAP
+# Tools → Options → Network → Connection → Proxy: 127.0.0.1:8443
+```
+
+No per-tool configuration. Set it once, every tool is scope-safe.
+
+## Demo
+
+```bash
+# 30-second test drive
+scopepilot init                          # name: crystal
+                                         # domains: client.laplace-groupe.com
+export SCOPEPILOT_MCP_API_KEY=*** rand -hex 32)
+scopepilot server --config scope.yaml    # start proxy
+
+# In another terminal:
+export https_proxy=http://127.0.0.1:8443
+curl -sk https://client.laplace-groupe.com/app/connexion  # ✅ 200
+curl -sk https://google.com                                # ❌ 403
+scopepilot check https://google.com                        # ❌ out of scope
+```
+
 ## Architecture
 
 ```text
