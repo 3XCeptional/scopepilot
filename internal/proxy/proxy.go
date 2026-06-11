@@ -9,7 +9,6 @@
 package proxy
 
 import (
-	"bufio"
 	"context"
 	"crypto/tls"
 	"encoding/json"
@@ -852,7 +851,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	p.resolvedIPs[host] = ips
 	p.mu.Unlock()
 
-	// 7. Hijack connection.
+	// 7. Hijack connection and establish a simple TCP tunnel.
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		reason := "CONNECT not supported: response writer is not a hijacker"
@@ -869,196 +868,45 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 	defer clientConn.Close()
 
-	// Respond 200 Connection established.
+	// Write 200 Connection established.
 	if _, err := clientConn.Write([]byte("HTTP/1.1 200 Connection established\r\n\r\n")); err != nil {
 		log.Printf("[proxy] CONNECT write 200 failed: %v", err)
 		return
 	}
 
-	// Initialize/retrieve the dynamic CA.
-	ca, err := p.getCA()
+	// Dial target using the resolved IPs (with DNS rebind protection).
+	dial := p.dialFn
+	if dial == nil {
+		dial = net.DialTimeout
+	}
+	targetAddr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	targetConn, err := dial("tcp", targetAddr, 10*time.Second)
 	if err != nil {
-		log.Printf("[connect] failed to get CA: %v", err)
+		log.Printf("[connect] dial failed for %s: %v", targetAddr, err)
 		return
 	}
+	defer targetConn.Close()
 
-	// Generate target certificate.
-	cert, err := ca.GenerateCert(host)
-	if err != nil {
-		log.Printf("[connect] failed to generate certificate for %s: %v", host, err)
-		return
-	}
+	log.Printf("[connect] TUNNEL %s (%s -> %s)", authority, clientConn.RemoteAddr(), targetAddr)
 
-	// Handshake with client over TLS.
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{*cert},
-	}
-	tlsClientConn := tls.Server(clientConn, tlsConfig)
-	if err := tlsClientConn.Handshake(); err != nil {
-		log.Printf("[connect] TLS handshake failed for %s: %v", host, err)
-		return
-	}
-	defer tlsClientConn.Close()
+	// Bidirectional relay.
+	var wg sync.WaitGroup
+	wg.Add(2)
+	var upBytes, downBytes int64
 
-	// Read decrypted HTTP requests from the TLS stream.
-	reader := bufio.NewReader(tlsClientConn)
-	for {
-		req, err := http.ReadRequest(reader)
-		if err != nil {
-			if err == io.EOF {
-				break
-			}
-			log.Printf("[connect] HTTP read error from client for %s: %v", host, err)
-			break
-		}
+	go func() {
+		defer wg.Done()
+		n, _ := io.Copy(targetConn, clientConn)
+		upBytes = n
+	}()
+	go func() {
+		defer wg.Done()
+		n, _ := io.Copy(clientConn, targetConn)
+		downBytes = n
+	}()
 
-		// Set scheme and host since http.ReadRequest reads relative URIs from TCP stream
-		req.URL.Scheme = "https"
-		if port == 443 {
-			req.URL.Host = host
-		} else {
-			req.URL.Host = net.JoinHostPort(host, fmt.Sprintf("%d", port))
-		}
-
-		// Re-run safety checks for every individual HTTP request.
-		// 1. Global kill switch
-		if p.CheckKillSwitch() {
-			reason := "global kill switch is active"
-			p.LogDecision("block", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"method":     req.Method,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 2. Active testing gate
-		if !p.ActiveTestingEnabled {
-			reason := "active testing disabled for this program"
-			p.LogDecision("deny", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 3. Scheme check
-		if !p.ValidateScheme(req.URL.Scheme) {
-			reason := fmt.Sprintf("scheme %q not allowed", req.URL.Scheme)
-			p.LogDecision("deny", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"scheme":     req.URL.Scheme,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 4. Port check
-		if !portOK {
-			reason := fmt.Sprintf("port %d not allowed", port)
-			p.LogDecision("deny", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"port":       fmt.Sprintf("%d", port),
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 5. Host scope check
-		inScope, scopeReason = p.CheckHostScope(host)
-		if !inScope {
-			reason := fmt.Sprintf("host out of scope: %s", scopeReason)
-			p.LogDecision("deny", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 6. Path exclusion check (Crucial MitM feature!)
-		if p.CheckPathExclusion(host, req.URL.Path) {
-			reason := fmt.Sprintf("path %q excluded by path_prefix rule", req.URL.Path)
-			p.LogDecision("deny", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"path":       req.URL.Path,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 7. Validate resolved IPs
-		if ok, ipReason := p.ValidateIPs(ips); !ok {
-			reason := fmt.Sprintf("host %s resolves to blocked IP: %s", host, ipReason)
-			p.LogDecision("block", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"ips":        ips,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 8. DryRun mode check
-		if p.DryRun {
-			p.LogDecision("dry_run", map[string]interface{}{
-				"decision":   "allow",
-				"host":       host,
-				"url":        req.URL.String(),
-				"method":     req.Method,
-				"program_id": p.ProgramID,
-			})
-			writeDryRunResp(tlsClientConn, host, req.URL.String())
-			continue
-		}
-
-		// 9. Rate limit check
-		if p.Limits.RequestsPerSecondPerHost > 0 && !p.CheckRateLimit(host) {
-			reason := fmt.Sprintf("rate limit exceeded for host %s", host)
-			p.LogDecision("deny", map[string]interface{}{
-				"reason":     reason,
-				"host":       host,
-				"url":        req.URL.String(),
-				"program_id": p.ProgramID,
-			})
-			writeDenyResp(tlsClientConn, reason)
-			continue
-		}
-
-		// 10. Forward decrypted HTTP request
-		p.LogDecision("allow", map[string]interface{}{
-			"host":       host,
-			"url":        req.URL.String(),
-			"method":     req.Method,
-			"program_id": p.ProgramID,
-			"ips":        ips,
-		})
-		log.Printf("[connect/mitm] ALLOW %s %s%s", req.Method, host, req.URL.Path)
-
-		if err := p.ForwardDecryptedRequest(tlsClientConn, req); err != nil {
-			log.Printf("[connect/mitm] forward request failed for %s: %v", host, err)
-			break
-		}
-	}
+	wg.Wait()
+	log.Printf("[connect] CLOSE %s (up: %d down: %d bytes)", authority, upBytes, downBytes)
 }
 
 // ForwardDecryptedRequest forwards a decrypted HTTP request and writes the response back to the client connection.
