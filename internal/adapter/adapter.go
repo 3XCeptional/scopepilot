@@ -11,6 +11,8 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -279,19 +281,7 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 	}
 
 	// Step 2: Build BBOT command with safe args.
-	// Use: bbot -t <targets> --no-dns --no-www --force -o json -n <output-dir>
-	// Only passive modules: --passive-only
-	// No exploitation flags.
-	args := []string{
-		"-t", strings.Join(inScope, ","),
-		"--passive-only",
-		"--no-dns",
-		"--no-www",
-		"--force",
-		"-o", "json",
-	}
-
-	args = append(args, "--proxy", cfg.ProxyURL)
+	args := bbotArgs(inScope, cfg.ProxyURL)
 
 	cmd := exec.CommandContext(ctx, cfg.BinaryPath, args...)
 	cmd.Env = proxyEnvironment(cfg.ProxyURL)
@@ -363,21 +353,7 @@ func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*Nuclei
 	}
 
 	// Step 2: Build Nuclei command with safe args.
-	// Keep concurrency low, exclude intrusive template classes, and default
-	// to informational/low severities unless a separately authorized caller
-	// supplies a stricter severity allowlist.
-	args := []string{
-		"-t", cfg.TemplateDir,
-		"-json",
-		"-o", "-",
-		"--no-httpx",
-		"--bulk-size", "5",
-		"--concurrency", "2",
-		"-exclude-tags", "fuzz,dos,headless,code",
-	}
-	for _, target := range inScope {
-		args = append(args, "-u", target)
-	}
+	args := nucleiArgs(cfg.TemplateDir, inScope)
 
 	severities := cfg.Severities
 	if len(severities) == 0 {
@@ -474,4 +450,70 @@ func proxyEnvironment(proxyURL string) []string {
 		"all_proxy="+proxyURL,
 		"no_proxy=",
 	)
+}
+
+// bbotArgs returns the CLI args for a BBOT discovery run.
+// Uses the most recent BBOT v2.x flags (passive-only via -rf passive).
+func bbotArgs(targets []string, proxyURL string) []string {
+	return []string{
+		"-t", strings.Join(targets, ","),
+		"-rf", "passive",
+		"-y",
+		"-o", "-",
+		"-om", "json",
+		"--proxy", proxyURL,
+	}
+}
+
+// nucleiArgs returns the CLI args for a Nuclei scan run.
+// Uses -jsonl (v3.x) which is also supported by v2.x.
+func nucleiArgs(templateDir string, targets []string) []string {
+	args := []string{
+		"-t", templateDir,
+		"-jsonl",
+		"-o", "-",
+		"--no-httpx",
+		"--bulk-size", "5",
+		"--concurrency", "2",
+		"-exclude-tags", "fuzz,dos,headless,code",
+	}
+	for _, target := range targets {
+		args = append(args, "-u", target)
+	}
+	return args
+}
+
+// detectBBOTVersion detects the installed bbot version.
+// Returns major version number (0 if detection fails).
+func detectBBOTVersion(binaryPath string) int {
+	data, err := exec.Command(binaryPath, "--version").Output()
+	if err != nil {
+		return 0
+	}
+	return parseMajorVersion(string(data))
+}
+
+// detectNucleiVersion detects the installed nuclei version.
+// Returns major version number (0 if detection fails).
+func detectNucleiVersion(binaryPath string) int {
+	data, err := exec.Command(binaryPath, "--version").Output()
+	if err != nil {
+		return 0
+	}
+	return parseMajorVersion(string(data))
+}
+
+// parseMajorVersion extracts the major version number from a tool's
+// --version output (e.g. "2.14.0" → 2).
+func parseMajorVersion(versionOutput string) int {
+	re := regexp.MustCompile(`(\d+)\.\d+\.\d+`)
+	matches := re.FindStringSubmatch(versionOutput)
+	if len(matches) < 2 {
+		return 0
+	}
+	major, err := strconv.Atoi(matches[1])
+	if err != nil {
+		return 0
+	}
+	return major
 }
