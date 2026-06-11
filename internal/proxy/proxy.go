@@ -430,7 +430,9 @@ func (p *Proxy) ForwardRequest(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Copy headers from the original request.
+	// Copy headers from the original request, stripping hop-by-hop headers
+	// per RFC 7230 §6.1 to prevent HTTP request smuggling.
+	stripHopByHopHeaders(r.Header)
 	for key, values := range r.Header {
 		for _, val := range values {
 			outReq.Header.Add(key, val)
@@ -527,6 +529,21 @@ func (p *Proxy) validateRedirectTarget(targetURL *url.URL) error {
 	p.storeResolvedIPs(host, ips)
 
 	return nil
+}
+
+// stripHopByHopHeaders removes hop-by-hop headers per RFC 7230 §6.1.
+func stripHopByHopHeaders(h http.Header) {
+	hopByHop := []string{
+		"Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization",
+		"TE", "Trailer", "Transfer-Encoding", "Upgrade",
+	}
+	for _, name := range hopByHop {
+		h.Del(name)
+	}
+	for _, connHeader := range h.Values("Connection") {
+		h.Del(connHeader)
+	}
+	h.Del("Connection")
 }
 
 // RedactResponseHeaders removes sensitive headers (Authorization, Cookie,

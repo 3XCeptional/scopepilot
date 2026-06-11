@@ -558,3 +558,60 @@ func TestConnectDialPinnedIP(t *testing.T) {
 		t.Errorf("expected dial to pinned IP 93.184.216.34:443, got %q", dialedAddr)
 	}
 }
+
+func TestStripHopByHopHeaders(t *testing.T) {
+	cfg := connectProxyConfig()
+	cfg.Limits = config.LimitsConfig{
+		RequestsPerSecondPerHost: 100,
+		MaxConcurrency:           100,
+	}
+	cfg.AllowedSchemes = []string{"http", "https"}
+	cfg.AllowedPorts = []int{80, 443}
+	p := NewProxy(cfg)
+	p.lookupHostFn = func(ctx context.Context, host string) ([]string, error) {
+		return []string{"93.184.216.34"}, nil
+	}
+	p.dialFn = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+		return nil, fmt.Errorf("no dial")
+	}
+
+	proxySrv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		// Assert hop-by-hop headers are NOT present
+		forbidden := []string{"Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization", "TE", "Trailer", "Transfer-Encoding", "Upgrade"}
+		for _, name := range forbidden {
+			if r.Header.Get(name) != "" {
+				t.Errorf("hop-by-hop header %q was forwarded", name)
+			}
+		}
+		// Assert allowed headers ARE present
+		if r.Header.Get("Accept") != "test/plain" {
+			t.Errorf("expected Accept header to be forwarded")
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer proxySrv.Close()
+
+	// Rewrite the proxy's httpClient to dial the test server
+	origTransport := p.httpClient.Transport
+	p.httpClient.Transport = &http.Transport{
+		DialContext: func(ctx context.Context, network, addr string) (net.Conn, error) {
+			return net.Dial("tcp", proxySrv.Listener.Addr().String())
+		},
+	}
+	defer func() { p.httpClient.Transport = origTransport }()
+
+	rec := httptest.NewRecorder()
+	// Use http scheme so the upstream HTTP server can handle it
+	req := httptest.NewRequest(http.MethodGet, "http://tunnel.example.com:80/test", nil)
+	req.Header.Set("Accept", "test/plain")
+	req.Header.Set("Connection", "X-Dummy")
+	req.Header.Set("X-Dummy", "should-be-stripped")
+	req.Header.Set("Proxy-Authorization", "Basic dGVzdDp0ZXN0")
+	req.Host = "tunnel.example.com:80"
+
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
+	}
+}
