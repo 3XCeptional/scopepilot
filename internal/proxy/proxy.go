@@ -770,9 +770,10 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 // writeHealth writes a standard health check JSON response.
 func (p *Proxy) writeHealth(w http.ResponseWriter) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(http.StatusOK)
-	w.Write([]byte(`{"status":"ok","program_id":"` + p.ProgramID + `"}`))
+	json.NewEncoder(w).Encode(map[string]interface{}{
+		"status":     "ok",
+		"program_id": p.ProgramID,
+	})
 }
 
 // getCA returns the CA instance, initializing it lazily if necessary.

@@ -625,3 +625,26 @@ func TestStripHopByHopHeaders(t *testing.T) {
 		t.Errorf("expected 200, got %d (body: %s)", rec.Code, rec.Body.String())
 	}
 }
+
+func TestWriteHealthJSONEncoding(t *testing.T) {
+	// ProgramID with embedded quote would break string-concatenated JSON
+	p := &Proxy{Config: Config{ProgramID: `test"quote`}}
+	rec := httptest.NewRecorder()
+	p.writeHealth(rec)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	// Verify valid JSON round-trips
+	var result map[string]interface{}
+	if err := json.Unmarshal(rec.Body.Bytes(), &result); err != nil {
+		t.Fatalf("health response is not valid JSON: %v\nbody: %s", err, rec.Body.String())
+	}
+	if result["status"] != "ok" {
+		t.Errorf("expected status ok, got %v", result["status"])
+	}
+	if result["program_id"] != `test"quote` {
+		t.Errorf("expected program_id test\"quote, got %v", result["program_id"])
+	}
+}
