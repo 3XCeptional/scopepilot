@@ -566,7 +566,7 @@ func (s *Server) handleRunSpecialist(ctx context.Context, name string, params ma
 			return nil, fmt.Errorf("gate specialist approval is not configured")
 		}
 		approvalToken, _ := params["approval_token"].(string)
-		if approvalToken != gateToken {
+		if !secureEqual(approvalToken, gateToken) {
 			return nil, fmt.Errorf("gate specialist approval denied")
 		}
 		cfg.AllowExploitation = true
