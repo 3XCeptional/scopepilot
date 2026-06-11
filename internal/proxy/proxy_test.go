@@ -473,3 +473,35 @@ func TestResolvedIPsBounded(t *testing.T) {
 		t.Errorf("resolvedIPs map too small after fill: %d entries, expected near %d", count, maxResolvedIPs)
 	}
 }
+
+func TestHostHeaderMismatchDenied(t *testing.T) {
+	cfg := Config{
+		ProgramID:            "test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{
+				{Type: "exact_host", Value: "in-scope.com"},
+			},
+		},
+	}
+	p := NewProxy(cfg)
+	p.lookupHostFn = func(ctx context.Context, host string) ([]string, error) {
+		return []string{"93.184.216.34"}, nil
+	}
+
+	// Craft a request with mismatched Host header vs request-line URL.
+	// Raw: GET http://internal-server/admin HTTP/1.1 with "Host: in-scope.com"
+	// The host on the request line (internal-server) differs from the
+	// Host header (in-scope.com) — ParseAndNormalizeURL must reject.
+	req := httptest.NewRequest(http.MethodGet, "http://internal-server/admin", nil)
+	req.Host = "in-scope.com"
+
+	rec := httptest.NewRecorder()
+	p.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusForbidden {
+		t.Errorf("expected 403 for Host header mismatch, got %d", rec.Code)
+	}
+}

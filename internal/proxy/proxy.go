@@ -221,7 +221,8 @@ func (p *Proxy) CheckKillSwitch() bool {
 
 // ParseAndNormalizeURL extracts the target URL from the incoming request and
 // normalizes it. It returns the parsed URL, the normalized string, or an
-// error if the URL is invalid or missing a host.
+// error if the URL is invalid or missing a host, OR if the Host header
+// and request-line URL disagree (prevents scope bypass via Host header spoofing).
 func (p *Proxy) ParseAndNormalizeURL(r *http.Request) (*url.URL, string, error) {
 	// Reconstruct the full URL from the request.
 	scheme := r.URL.Scheme
@@ -232,6 +233,15 @@ func (p *Proxy) ParseAndNormalizeURL(r *http.Request) (*url.URL, string, error) 
 			scheme = "http"
 		}
 	}
+
+	// Protect against Host header mismatch: if the request-line carries an
+	// absolute URL (e.g. "GET http://internal/admin HTTP/1.1") whose host
+	// differs from the Host header, an attacker could trick scope validation
+	// into checking the Host header while forwarding to the request-line URL.
+	if r.URL.IsAbs() && r.URL.Host != "" && r.Host != "" && r.URL.Host != r.Host {
+		return nil, "", fmt.Errorf("Host header %q does not match request-line host %q", r.Host, r.URL.Host)
+	}
+
 	raw := scheme + "://" + r.Host + r.URL.RequestURI()
 
 	parsed, err := url.Parse(raw)
@@ -726,6 +736,13 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 		"ips":        ips,
 	})
 	log.Printf("[proxy] ALLOW %s %s%s", r.Method, host, parsedURL.Path)
+	// Rewrite request URL to the validated target so ForwardRequest and any
+	// downstream code send traffic to the same host that passed scope validation.
+	// Without this, an attacker could send an absolute request-line URL
+	// (e.g. "GET http://internal/admin HTTP/1.1") with a different Host header
+	// to bypass scope validation — the validator checks r.Host, but
+	// ForwardRequest uses r.URL.String().
+	r.URL = parsedURL
 	p.ForwardRequest(w, r)
 }
 
