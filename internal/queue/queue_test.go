@@ -303,7 +303,7 @@ func TestStaleLockIsRemoved(t *testing.T) {
 		t.Fatalf("chtimes: %v", err)
 	}
 
-	// Acquire should succeed: stale lock is removed.
+	// Acquire should succeed: stale lock is removed and recovery logged.
 	unlock, err := newLockFile(queuePath)
 	if err != nil {
 		t.Fatalf("expected stale lock to be cleared, got: %v", err)
@@ -313,6 +313,18 @@ func TestStaleLockIsRemoved(t *testing.T) {
 	// Lock file should be gone.
 	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
 		t.Error("expected lock file to be removed after unlock")
+	}
+
+	// Acquire again fresh to prove the recovery path truly cleaned up.
+	unlock2, err := newLockFile(queuePath)
+	if err != nil {
+		t.Fatalf("expected fresh acquire after recovery, got: %v", err)
+	}
+	unlock2()
+
+	// Lock file gone again.
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("expected lock file to be removed after second release")
 	}
 }
 

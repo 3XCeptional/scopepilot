@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"encoding/json"
 	"fmt"
+	"log"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,7 +24,11 @@ func newLockFile(path string) (func(), error) {
 	if err != nil {
 		// Check for stale lock: if the file is >30s old, remove and retry.
 		if fi, statErr := os.Stat(lockPath); statErr == nil {
-			if time.Since(fi.ModTime()) > 30*time.Second {
+			age := time.Since(fi.ModTime())
+			if age > 30*time.Second {
+				host, _ := os.Hostname()
+				log.Printf("[queue] recovered stale lock %q (age=%s host=%s pid=%d)",
+					lockPath, age.Round(time.Second), host, os.Getpid())
 				os.Remove(lockPath)
 				f, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0666)
 				if err == nil {
