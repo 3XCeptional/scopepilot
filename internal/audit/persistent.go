@@ -114,8 +114,8 @@ func (pl *PersistentLogger) replayFromDB(n int) {
 
 // Add logs an entry to both the in-memory buffer and SQLite.
 func (pl *PersistentLogger) Add(entry *Entry) {
-	pl.Log(entry.Component, entry.EventType, entry.Data)
-	pl.persist(entry)
+	saved := pl.Log(entry.Component, entry.EventType, entry.Data)
+	pl.persist(saved)
 }
 
 func (pl *PersistentLogger) persist(entry *Entry) {
