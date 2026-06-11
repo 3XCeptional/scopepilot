@@ -505,3 +505,56 @@ func TestHostHeaderMismatchDenied(t *testing.T) {
 		t.Errorf("expected 403 for Host header mismatch, got %d", rec.Code)
 	}
 }
+
+func TestConnectDialPinnedIP(t *testing.T) {
+	probe, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Skipf("cannot bind local listener: %v", err)
+	}
+	probe.Close()
+
+	// Set up a real TLS target on loopback
+	target := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer target.Close()
+	targetAddr := target.Listener.Addr().String()
+
+	p := NewProxy(connectProxyConfig())
+	// DNS returns the public IP the scope check expects
+	p.SetDNSOverride(func(ctx context.Context, host string) ([]string, error) {
+		return []string{"93.184.216.34"}, nil
+	})
+
+	// Record what address dial() was called with
+	var dialedAddr string
+	p.dialFn = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+		dialedAddr = addr
+		return net.DialTimeout("tcp", targetAddr, timeout)
+	}
+
+	proxySrv := httptest.NewServer(p)
+	defer proxySrv.Close()
+
+	// Issue a CONNECT request through the proxy
+	client := &http.Client{
+		Transport: &http.Transport{
+			Proxy: func(r *http.Request) (*url.URL, error) {
+				return url.Parse(proxySrv.URL)
+			},
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true, ServerName: "tunnel.example.com"},
+		},
+		Timeout: 10 * time.Second,
+	}
+
+	resp, err := client.Get("https://tunnel.example.com:443/")
+	if err != nil {
+		t.Fatalf("CONNECT tunnel failed: %v", err)
+	}
+	resp.Body.Close()
+
+	// The dial should have used the pinned IP (93.184.216.34), not the hostname
+	if dialedAddr != "93.184.216.34:443" {
+		t.Errorf("expected dial to pinned IP 93.184.216.34:443, got %q", dialedAddr)
+	}
+}

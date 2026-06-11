@@ -899,11 +899,22 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Dial target using the resolved IPs (with DNS rebind protection).
+	// Read the pinned IP from resolvedIPs to avoid a fresh DNS lookup at dial
+	// time (which could be hijacked by a DNS rebinding attack).
+	p.mu.RLock()
+	pinnedIPs := p.resolvedIPs[host]
+	p.mu.RUnlock()
+
+	dialIP := host
+	if len(pinnedIPs) > 0 {
+		dialIP = pinnedIPs[0]
+	}
+
 	dial := p.dialFn
 	if dial == nil {
 		dial = net.DialTimeout
 	}
-	targetAddr := net.JoinHostPort(host, fmt.Sprintf("%d", port))
+	targetAddr := net.JoinHostPort(dialIP, fmt.Sprintf("%d", port))
 	targetConn, err := dial("tcp", targetAddr, 10*time.Second)
 	if err != nil {
 		log.Printf("[connect] dial failed for %s: %v", targetAddr, err)
