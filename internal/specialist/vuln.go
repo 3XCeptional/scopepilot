@@ -107,7 +107,10 @@ func (v *Vuln) Run(ctx context.Context, targets []string, cfg Config) (*Result, 
 			Duration:    result.Duration,
 		}
 		if p, err := report.WriteReport(nucleiResult.Findings, meta, cfg.OutputDir); err == nil {
-			details, _ := result.Details.(map[string]interface{})
+			details, ok := result.Details.(map[string]interface{})
+			if !ok {
+				details = make(map[string]interface{})
+			}
 			details["report_path"] = p
 			result.Details = details
 		}

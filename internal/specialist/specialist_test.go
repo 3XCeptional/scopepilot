@@ -6,6 +6,8 @@ import (
 	"net"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -1284,5 +1286,60 @@ func TestGateRunRecordsStartTime(t *testing.T) {
 	}
 	if g.startTime.IsZero() {
 		t.Error("expected non-zero startTime after Run")
+	}
+}
+
+func TestVulnRunGeneratesReportPath(t *testing.T) {
+	// Verify that Vuln.Run produces a report_path in Details when findings
+	// are present and OutputDir is set. Uses a fake nuclei that writes a
+	// minimal JSONL finding to the -o file.
+	srv := newMCPServer(t, alwaysAllow, false)
+	defer srv.Close()
+
+	outputDir := t.TempDir()
+	fakeBin := filepath.Join(t.TempDir(), "nuclei-fake")
+	fakeScript := `#!/bin/sh
+# Find the -o flag in args and write a sample finding to that file.
+for i in "$@"; do
+  case "$i" in
+    -o) shift; echo '{"template-id":"test","name":"Test Find","severity":"high","host":"https://app.example.com","type":"http"}' > "$1"; exit 0;;
+  esac
+  shift
+done
+exit 1
+`
+	if err := os.WriteFile(fakeBin, []byte(fakeScript), 0700); err != nil {
+		t.Fatalf("write fake nuclei: %v", err)
+	}
+
+	cfg := Config{
+		NucleiBinary: fakeBin,
+		TemplateDir:  "/templates",
+		MCPURL:       srv.URL,
+		ProgramID:    "test-prog",
+		ProxyURL:     "http://127.0.0.1:8443",
+		OutputDir:    outputDir,
+		DryRun:       false,
+		Timeout:      5 * time.Second,
+	}
+
+	v := NewVuln()
+	result, err := v.Run(context.Background(), []string{"app.example.com"}, cfg)
+	if err != nil {
+		t.Fatalf("Vuln.Run error: %v", err)
+	}
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+	details, ok := result.Details.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected Details map, got %T", result.Details)
+	}
+	rp, ok := details["report_path"]
+	if !ok || rp == "" {
+		t.Errorf("expected non-empty report_path in Details, got %v", rp)
+	}
+	if result.Findings == 0 {
+		t.Error("expected Findings > 0")
 	}
 }
