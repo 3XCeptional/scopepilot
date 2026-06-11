@@ -802,9 +802,10 @@ func (s *Server) handleRunSafeCheck(params map[string]interface{}) (map[string]i
 		if !strings.Contains(rawURL, "://") {
 			rawURL = "https://" + rawURL
 		}
-		if _, err := url.Parse(rawURL); err == nil {
-			urls = append(urls, rawURL)
+		if _, err := url.Parse(rawURL); err != nil {
+			return nil, fmt.Errorf("invalid URL at index %d (%q): %v", i, rawURL, err)
 		}
+		urls = append(urls, rawURL)
 	}
 
 	results := s.prx.RunSafeCheck(urls)
@@ -996,11 +997,11 @@ func (s *Server) handleScopeShape() map[string]interface{} {
 	}
 
 	return map[string]interface{}{
-		"has_wildcards":      wildcardCount > 0,
-		"has_cidr":           hasCIDR,
-		"exact_host_count":   float64(exactCount),
-		"wildcard_count":     float64(wildcardCount),
-		"recommendation":     rec,
+		"has_wildcards":    wildcardCount > 0,
+		"has_cidr":         hasCIDR,
+		"exact_host_count": float64(exactCount),
+		"wildcard_count":   float64(wildcardCount),
+		"recommendation":   rec,
 	}
 }
 

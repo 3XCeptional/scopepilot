@@ -37,14 +37,18 @@ func NewEngine(programID string, scopeCfg config.ScopeConfig) *Engine {
 	}
 }
 
-// IncludeRules returns the include scope rules for the engine.
+// IncludeRules returns a defensive copy of the include rules.
 func (e *Engine) IncludeRules() []config.ScopeRule {
-	return e.includes
+	r := make([]config.ScopeRule, len(e.includes))
+	copy(r, e.includes)
+	return r
 }
 
-// ExcludeRules returns the exclude scope rules for the engine.
+// ExcludeRules returns a defensive copy of the exclude rules.
 func (e *Engine) ExcludeRules() []config.ScopeRule {
-	return e.excludes
+	r := make([]config.ScopeRule, len(e.excludes))
+	copy(r, e.excludes)
+	return r
 }
 
 // IsHostInScope checks whether the given hostname is in scope.

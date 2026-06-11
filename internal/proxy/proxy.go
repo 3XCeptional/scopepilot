@@ -18,8 +18,8 @@ import (
 	"net"
 	"net/http"
 	"net/url"
-	"strings"
 	"strconv"
+	"strings"
 	"sync"
 	"time"
 
@@ -912,7 +912,16 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	// Store resolved IPs for the http.Client's DialContext.
 	p.storeResolvedIPs(host, ips)
 
-	// 7. Hijack connection and establish a simple TCP tunnel.
+	// 7. Per-host rate limiting.
+	if !p.CheckRateLimit(host) {
+		reason := fmt.Sprintf("rate limit exceeded for host %s", host)
+		logDeny(reason, map[string]interface{}{"host": host})
+		log.Printf("[connect] DENY %s - %s", authority, reason)
+		p.WriteDenyResponse(w, reason)
+		return
+	}
+
+	// 8. Hijack connection and establish a simple TCP tunnel.
 	hj, ok := w.(http.Hijacker)
 	if !ok {
 		reason := "CONNECT not supported: response writer is not a hijacker"

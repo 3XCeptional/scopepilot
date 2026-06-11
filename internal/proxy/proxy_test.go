@@ -24,6 +24,10 @@ func connectProxyConfig() Config {
 		ActiveTestingEnabled: true,
 		AllowedSchemes:       []string{"https"},
 		AllowedPorts:         []int{443},
+		Limits: config.LimitsConfig{
+			RequestsPerSecondPerHost: 100,
+			MaxConcurrency:           100,
+		},
 		ScopeCfg: config.ScopeConfig{
 			Include: []config.ScopeRule{
 				{Type: "exact_host", Value: "tunnel.example.com"},
