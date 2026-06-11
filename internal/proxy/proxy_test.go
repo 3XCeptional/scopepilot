@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/tls"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"net/http"
@@ -437,5 +438,38 @@ func TestValidatePort(t *testing.T) {
 	}
 	if _, ok := p.ValidatePort("443", "https"); !ok {
 		t.Error("expected port 443 to be allowed")
+	}
+}
+
+func TestResolvedIPsBounded(t *testing.T) {
+	p := NewProxy(Config{
+		ProgramID: "test",
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{{Type: "exact_host", Value: "example.com"}},
+		},
+		AllowedSchemes: []string{"https"},
+		AllowedPorts:   []int{443},
+	})
+	p.dialFn = func(network, addr string, timeout time.Duration) (net.Conn, error) {
+		return nil, fmt.Errorf("no dial")
+	}
+
+	// Fill past the cap
+	for i := 0; i < maxResolvedIPs+100; i++ {
+		host := fmt.Sprintf("host-%d.example.com", i)
+		p.storeResolvedIPs(host, []string{"1.2.3.4"})
+	}
+
+	// Map should not exceed cap
+	p.mu.RLock()
+	count := len(p.resolvedIPs)
+	p.mu.RUnlock()
+	if count > maxResolvedIPs {
+		t.Errorf("resolvedIPs map grew past cap: %d entries, max %d", count, maxResolvedIPs)
+	}
+
+	// Map should be at or near cap (not tiny)
+	if count < maxResolvedIPs-100 {
+		t.Errorf("resolvedIPs map too small after fill: %d entries, expected near %d", count, maxResolvedIPs)
 	}
 }

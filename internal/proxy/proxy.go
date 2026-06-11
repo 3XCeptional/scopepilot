@@ -76,6 +76,21 @@ type Proxy struct {
 	mu          sync.RWMutex
 }
 
+const maxResolvedIPs = 10000
+
+// storeResolvedIPs adds a host→IPs entry and evicts randomly when over cap.
+func (p *Proxy) storeResolvedIPs(host string, ips []string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if len(p.resolvedIPs) >= maxResolvedIPs {
+		for k := range p.resolvedIPs {
+			delete(p.resolvedIPs, k)
+			break
+		}
+	}
+	p.resolvedIPs[host] = ips
+}
+
 // SetDNSOverride replaces the DNS lookup function with a custom one.
 // Used by tests to avoid real DNS lookups. Pass nil to restore default.
 func (p *Proxy) SetDNSOverride(fn func(ctx context.Context, host string) ([]string, error)) {
@@ -392,9 +407,7 @@ func (p *Proxy) ForwardRequest(w http.ResponseWriter, r *http.Request) {
 	if targetHost != "" && net.ParseIP(targetHost) == nil {
 		if ips, dnsErr := p.LookupHost(targetHost); dnsErr == nil {
 			if _, reason := p.ValidateIPs(ips); reason == "" {
-				p.mu.Lock()
-				p.resolvedIPs[targetHost] = ips
-				p.mu.Unlock()
+				p.storeResolvedIPs(targetHost, ips)
 			}
 		}
 	}
@@ -501,9 +514,7 @@ func (p *Proxy) validateRedirectTarget(targetURL *url.URL) error {
 
 	// Store resolved IPs so the transport's DialContext can connect directly
 	// to these IPs (preventing DNS rebinding on redirects).
-	p.mu.Lock()
-	p.resolvedIPs[host] = ips
-	p.mu.Unlock()
+	p.storeResolvedIPs(host, ips)
 
 	return nil
 }
@@ -677,9 +688,7 @@ func (p *Proxy) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 
 	// Store resolved IPs so the transport's DialContext can connect directly
 	// to these IPs (preventing DNS rebinding attacks).
-	p.mu.Lock()
-	p.resolvedIPs[host] = ips
-	p.mu.Unlock()
+	p.storeResolvedIPs(host, ips)
 
 	// 9. DryRun mode — check BEFORE rate limiting since no request is forwarded.
 	if p.DryRun {
@@ -847,9 +856,7 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Store resolved IPs for the http.Client's DialContext.
-	p.mu.Lock()
-	p.resolvedIPs[host] = ips
-	p.mu.Unlock()
+	p.storeResolvedIPs(host, ips)
 
 	// 7. Hijack connection and establish a simple TCP tunnel.
 	hj, ok := w.(http.Hijacker)
