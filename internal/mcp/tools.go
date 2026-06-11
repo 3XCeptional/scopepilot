@@ -856,8 +856,8 @@ func (s *Server) handleRunSpecialist(ctx context.Context, name string, params ma
 				"status":       "skipped",
 				"note":         "scope has no wildcards, passive subdomain enumeration skipped",
 				"known_hosts":  kh,
-				"targets_in":   len(targets),
-				"targets_pass": len(targets),
+				"targets_in":   float64(len(targets)),
+				"targets_pass": float64(len(targets)),
 			}, nil
 		}
 	}

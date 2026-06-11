@@ -1386,6 +1386,12 @@ func TestCallTool_RunRecon_ExactHostScope_SkipsBBOT(t *testing.T) {
 	if len(kh) == 0 {
 		t.Error("expected known_hosts to include targets")
 	}
+	if tin, _ := r["targets_in"].(float64); tin != 1 {
+		t.Errorf("expected targets_in=1, got %v", tin)
+	}
+	if tp, _ := r["targets_pass"].(float64); tp != 1 {
+		t.Errorf("expected targets_pass=1, got %v", tp)
+	}
 }
 
 func TestSetAPIKey_Rotation(t *testing.T) {
