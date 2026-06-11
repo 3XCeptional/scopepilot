@@ -14,10 +14,27 @@ import (
 )
 
 // newLockFile creates a portable advisory lock using a separate lock file.
+// If the lock file already exists and is older than 30 seconds (stale),
+// it is automatically removed and acquisition is retried once. This
+// prevents permanent lockout after a process crash during saveTasks.
 func newLockFile(path string) (func(), error) {
 	lockPath := path + ".lock"
 	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0666)
 	if err != nil {
+		// Check for stale lock: if the file is >30s old, remove and retry.
+		if fi, statErr := os.Stat(lockPath); statErr == nil {
+			if time.Since(fi.ModTime()) > 30*time.Second {
+				os.Remove(lockPath)
+				f, err = os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0666)
+				if err == nil {
+					f.Close()
+					unlock := func() {
+						os.Remove(lockPath)
+					}
+					return unlock, nil
+				}
+			}
+		}
 		return nil, fmt.Errorf("cannot acquire lock: %w", err)
 	}
 	f.Close()

@@ -287,3 +287,53 @@ func TestQueueDuplicateID(t *testing.T) {
 		t.Error("expected error adding task with duplicate ID, got nil")
 	}
 }
+
+func TestStaleLockIsRemoved(t *testing.T) {
+	tmpDir := t.TempDir()
+	queuePath := filepath.Join(tmpDir, "stale-test.jsonl")
+	lockPath := queuePath + ".lock"
+
+	// Create a stale lock file (older than 30s).
+	if err := os.WriteFile(lockPath, []byte("stale"), 0644); err != nil {
+		t.Fatalf("write stale lock: %v", err)
+	}
+	// Set mtime to 60 seconds ago.
+	past := time.Now().Add(-60 * time.Second)
+	if err := os.Chtimes(lockPath, past, past); err != nil {
+		t.Fatalf("chtimes: %v", err)
+	}
+
+	// Acquire should succeed: stale lock is removed.
+	unlock, err := newLockFile(queuePath)
+	if err != nil {
+		t.Fatalf("expected stale lock to be cleared, got: %v", err)
+	}
+	unlock() // release
+
+	// Lock file should be gone.
+	if _, err := os.Stat(lockPath); !os.IsNotExist(err) {
+		t.Error("expected lock file to be removed after unlock")
+	}
+}
+
+func TestRecentLockIsNotRemoved(t *testing.T) {
+	tmpDir := t.TempDir()
+	queuePath := filepath.Join(tmpDir, "recent-test.jsonl")
+	lockPath := queuePath + ".lock"
+
+	// Create a recent lock file (<30s old).
+	if err := os.WriteFile(lockPath, []byte("fresh"), 0644); err != nil {
+		t.Fatalf("write fresh lock: %v", err)
+	}
+
+	// Acquire should fail: lock is recent.
+	_, err := newLockFile(queuePath)
+	if err == nil {
+		t.Error("expected error for recent lock file, got nil")
+	}
+
+	// Lock file should still exist.
+	if _, err := os.Stat(lockPath); os.IsNotExist(err) {
+		t.Error("expected lock file to still exist after failed acquire")
+	}
+}
