@@ -648,3 +648,84 @@ func TestWriteHealthJSONEncoding(t *testing.T) {
 		t.Errorf("expected program_id test\"quote, got %v", result["program_id"])
 	}
 }
+
+func TestCheckURL_BlockedIPv6Mapped(t *testing.T) {
+	cfg := Config{
+		ProgramID:            "test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{
+				{Type: "wildcard_host", Value: "*.example.com"},
+			},
+		},
+	}
+	p := NewProxy(cfg)
+
+	tests := []struct {
+		name string
+		ip   string
+	}{
+		{"IPv4-mapped private 10.x", "::ffff:10.0.0.1"},
+		{"IPv4-mapped loopback", "::ffff:127.0.0.1"},
+		{"IPv4-mapped link-local", "::ffff:169.254.169.254"},
+		{"IPv4-mapped private 192.168.x", "::ffff:192.168.1.1"},
+		{"IPv6 ULA", "fc00::1"},
+		{"IPv6 ULA", "fd00::1"},
+		{"IPv6 link-local", "fe80::1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p.lookupHostFn = func(ctx context.Context, host string) ([]string, error) {
+				return []string{tc.ip}, nil
+			}
+			result, err := p.CheckURL("https://app.example.com/test")
+			if err != nil {
+				t.Fatalf("CheckURL error: %v", err)
+			}
+			if result.Allowed {
+				t.Errorf("expected %s to be blocked, got allowed: %s", tc.ip, result.Reason)
+			}
+		})
+	}
+}
+
+func TestCheckURL_AllowedPublicIPs(t *testing.T) {
+	cfg := Config{
+		ProgramID:            "test-program",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{
+				{Type: "wildcard_host", Value: "*.example.com"},
+			},
+		},
+	}
+	p := NewProxy(cfg)
+
+	tests := []struct {
+		name string
+		ip   string
+	}{
+		{"Google DNS IPv4", "8.8.8.8"},
+		{"Google DNS IPv6", "2606:4700::1"},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			p.lookupHostFn = func(ctx context.Context, host string) ([]string, error) {
+				return []string{tc.ip}, nil
+			}
+			result, err := p.CheckURL("https://app.example.com/test")
+			if err != nil {
+				t.Fatalf("CheckURL error: %v", err)
+			}
+			if !result.Allowed {
+				t.Errorf("expected %s to be allowed, got denied: %s", tc.ip, result.Reason)
+			}
+		})
+	}
+}

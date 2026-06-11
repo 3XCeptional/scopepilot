@@ -155,6 +155,7 @@ func TestNotBlockedIPs(t *testing.T) {
 		"8.8.8.8", "1.1.1.1",
 		"93.184.216.34", "45.33.32.156",
 		"2001:db8::1",
+		"2606:4700::1",
 	}
 
 	for _, ipStr := range allowed {
