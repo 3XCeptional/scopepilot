@@ -163,7 +163,7 @@ func (e *Engine) matchHostRule(rule config.ScopeRule, host string) bool {
 	case "exact_host":
 		return strings.EqualFold(host, normalize.Host(rule.Value))
 	case "wildcard_host":
-		return matchWildcard(rule.Value, host)
+		return matchWildcard(rule.Value, host, rule.IncludeApex)
 	case "path_prefix":
 		// For path_prefix rules, match the host portion.
 		return strings.EqualFold(host, normalize.Host(rule.Host))
@@ -173,7 +173,9 @@ func (e *Engine) matchHostRule(rule config.ScopeRule, host string) bool {
 }
 
 // matchWildcard checks if host matches a wildcard pattern like "*.example.com".
-func matchWildcard(pattern, host string) bool {
+// When includeApex is true, the pattern also matches the bare apex
+// (e.g. "*.example.com" matches both "sub.example.com" and "example.com").
+func matchWildcard(pattern, host string, includeApex bool) bool {
 	pattern = normalize.Host(pattern)
 	host = normalize.Host(host)
 
@@ -182,7 +184,18 @@ func matchWildcard(pattern, host string) bool {
 	}
 
 	suffix := pattern[1:] // ".example.com"
-	return strings.HasSuffix(host, suffix)
+	if strings.HasSuffix(host, suffix) {
+		return true
+	}
+
+	// When includeApex is set, also check if host is exactly the apex
+	// (the domain without the "*." prefix).
+	if includeApex {
+		apex := pattern[2:] // "example.com"
+		return strings.EqualFold(host, apex)
+	}
+
+	return false
 }
 
 // isBlockedIP returns true for loopback, link-local, multicast, CGNAT,

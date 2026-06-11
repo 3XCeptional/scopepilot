@@ -238,3 +238,94 @@ func TestCNAMELeavingScope(t *testing.T) {
 		t.Error("CNAME target should be out of scope")
 	}
 }
+
+func TestWildcardApex_NotIncludedByDefault(t *testing.T) {
+	// Default IncludeApex=false: *.example.com should NOT match example.com.
+	engine := NewEngine("test", makeScopeConfig(
+		[]config.ScopeRule{
+			{Type: "wildcard_host", Value: "*.example.com"},
+		},
+		nil,
+	))
+
+	// Subdomains always match.
+	for _, host := range []string{"sub.example.com", "deep.sub.example.com"} {
+		dec := engine.IsHostInScope(host)
+		if !dec.InScope {
+			t.Errorf("subdomain %q should be in scope with default IncludeApex=false, got reason: %s", host, dec.Reason)
+		}
+	}
+
+	// Apex must NOT be in scope when IncludeApex is false (default).
+	dec := engine.IsHostInScope("example.com")
+	if dec.InScope {
+		t.Error("apex example.com should NOT be in scope when IncludeApex is false (default)")
+	}
+
+	// Different domain still out of scope.
+	dec2 := engine.IsHostInScope("other.com")
+	if dec2.InScope {
+		t.Error("other.com should be out of scope")
+	}
+}
+
+func TestWildcardApex_IncludedWhenFlagSet(t *testing.T) {
+	// IncludeApex=true: *.example.com should match BOTH subdomains AND the apex.
+	engine := NewEngine("test", makeScopeConfig(
+		[]config.ScopeRule{
+			{Type: "wildcard_host", Value: "*.example.com", IncludeApex: true},
+		},
+		nil,
+	))
+
+	// Subdomains still match.
+	for _, host := range []string{"sub.example.com", "deep.sub.example.com"} {
+		dec := engine.IsHostInScope(host)
+		if !dec.InScope {
+			t.Errorf("subdomain %q should be in scope with IncludeApex=true, got reason: %s", host, dec.Reason)
+		}
+	}
+
+	// Apex NOW in scope.
+	dec := engine.IsHostInScope("example.com")
+	if !dec.InScope {
+		t.Error("apex example.com should be in scope when IncludeApex=true")
+	}
+
+	// Case-insensitive apex still works.
+	dec2 := engine.IsHostInScope("EXAMPLE.COM")
+	if !dec2.InScope {
+		t.Error("apex EXAMPLE.COM should be in scope when IncludeApex=true (case-insensitive)")
+	}
+
+	// Different domain still out of scope.
+	dec3 := engine.IsHostInScope("other.com")
+	if dec3.InScope {
+		t.Error("other.com should still be out of scope even with IncludeApex=true")
+	}
+}
+
+func TestWildcardApex_ExcludeStillWorks(t *testing.T) {
+	// When both include (with IncludeApex) and exclude rules exist,
+	// exclusions must still override inclusions for the apex.
+	engine := NewEngine("test", makeScopeConfig(
+		[]config.ScopeRule{
+			{Type: "wildcard_host", Value: "*.example.com", IncludeApex: true},
+		},
+		[]config.ScopeRule{
+			{Type: "exact_host", Value: "internal.example.com"},
+		},
+	))
+
+	// Apex should be in scope (included via IncludeApex, not excluded).
+	dec := engine.IsHostInScope("example.com")
+	if !dec.InScope {
+		t.Error("apex example.com should be in scope")
+	}
+
+	// Explicitly excluded should still be out of scope.
+	dec2 := engine.IsHostInScope("internal.example.com")
+	if dec2.InScope {
+		t.Error("internal.example.com should be out of scope despite IncludeApex")
+	}
+}

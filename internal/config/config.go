@@ -141,9 +141,10 @@ type ScopeConfig struct {
 
 // ScopeRule defines a single scope rule.
 type ScopeRule struct {
-	Type  string `yaml:"type" json:"type"` // exact_host, wildcard_host, path_prefix, cidr
-	Value string `yaml:"value" json:"value"`
-	Host  string `yaml:"host" json:"host"` // optional, for path_prefix rules
+	Type        string `yaml:"type" json:"type"` // exact_host, wildcard_host, path_prefix, cidr
+	Value       string `yaml:"value" json:"value"`
+	Host        string `yaml:"host" json:"host"` // optional, for path_prefix rules
+	IncludeApex bool   `yaml:"include_apex,omitempty" json:"include_apex,omitempty"` // wildcard_host only: when true, *.example.com also matches example.com
 }
 
 // RestrictionsConfig defines program-specific restrictions.
