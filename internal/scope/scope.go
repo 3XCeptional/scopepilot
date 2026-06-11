@@ -197,6 +197,8 @@ func isBlockedIP(ip net.IP) bool {
 		// Link-local
 		"169.254.0.0/16",
 		"fe80::/10",
+		// Unique Local Addresses (IPv6 private, RFC 4193)
+		"fc00::/7",
 		// Multicast
 		"224.0.0.0/4",
 		"ff00::/8",

@@ -132,6 +132,8 @@ func TestBlockedIPs(t *testing.T) {
 		"100.64.0.1", "100.127.255.255",
 		"0.0.0.1", "240.0.0.1",
 		"::1",
+		"fe80::1",
+		"fd00::1", "fc00::1",
 	}
 
 	for _, ipStr := range blocked {
