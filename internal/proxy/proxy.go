@@ -19,6 +19,7 @@ import (
 	"net/http"
 	"net/url"
 	"strings"
+	"strconv"
 	"sync"
 	"time"
 
@@ -285,7 +286,11 @@ func (p *Proxy) ValidatePort(portStr, scheme string) (int, bool) {
 			portInt = 80
 		}
 	} else {
-		fmt.Sscanf(portStr, "%d", &portInt)
+		var err error
+		portInt, err = strconv.Atoi(portStr)
+		if err != nil || portInt <= 0 || portInt > 65535 {
+			return 0, false
+		}
 	}
 	if len(p.AllowedPorts) == 0 {
 		return portInt, true

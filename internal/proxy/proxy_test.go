@@ -439,6 +439,16 @@ func TestValidatePort(t *testing.T) {
 	if _, ok := p.ValidatePort("443", "https"); !ok {
 		t.Error("expected port 443 to be allowed")
 	}
+
+	// Invalid port strings must be rejected
+	t.Run("invalid port strings", func(t *testing.T) {
+		invalid := []string{"443abc", "abc", "99999", "-1", "0", "65536"}
+		for _, ps := range invalid {
+			if _, ok := p.ValidatePort(ps, "https"); ok {
+				t.Errorf("expected port %q to be rejected", ps)
+			}
+		}
+	})
 }
 
 func TestResolvedIPsBounded(t *testing.T) {
