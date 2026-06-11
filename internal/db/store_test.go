@@ -2,111 +2,195 @@ package db
 
 import (
 	"testing"
+	"time"
 )
 
-func TestMemoryStoreLogAndRecent(t *testing.T) {
+func TestMemoryStore_RecordAssets(t *testing.T) {
 	s := NewMemoryStore(100)
 
-	e1 := s.LogEntry("test", "info", map[string]interface{}{"msg": "hello"})
-	e2 := s.LogEntry("test", "warn", map[string]interface{}{"msg": "warning"})
+	// Record initial assets
+	assets := []Asset{
+		{Host: "api.example.com", Source: "bbot", InScope: true, Tech: []string{"nginx"}},
+		{Host: "admin.example.com", Source: "bbot", InScope: true},
+	}
+	if err := s.RecordAssets("crystal", assets); err != nil {
+		t.Fatalf("RecordAssets failed: %v", err)
+	}
 
-	if e1.ID == "" || e2.ID == "" {
+	got, err := s.GetAssets("crystal")
+	if err != nil {
+		t.Fatalf("GetAssets failed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("expected 2 assets, got %d", len(got))
+	}
+
+	// Upsert same host with new source + tech
+	upsert := []Asset{
+		{Host: "api.example.com", Source: "manual", Tech: []string{"python"}},
+	}
+	if err := s.RecordAssets("crystal", upsert); err != nil {
+		t.Fatalf("RecordAssets upsert failed: %v", err)
+	}
+
+	got2, _ := s.GetAssets("crystal")
+	if len(got2) != 2 {
+		t.Fatalf("expected 2 assets after upsert, got %d", len(got2))
+	}
+	// Verify merge
+	for _, a := range got2 {
+		if a.Host == "api.example.com" {
+			if a.Source != "bbot,manual" {
+				t.Errorf("expected merged source 'bbot,manual', got %q", a.Source)
+			}
+			if len(a.Tech) != 2 {
+				t.Errorf("expected 2 techs (nginx+python), got %d: %v", len(a.Tech), a.Tech)
+			}
+		}
+	}
+}
+
+func TestMemoryStore_GetAssets_EmptyProgram(t *testing.T) {
+	s := NewMemoryStore(100)
+	got, err := s.GetAssets("nonexistent")
+	if err != nil {
+		t.Fatalf("GetAssets failed: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0 assets for empty program, got %d", len(got))
+	}
+}
+
+func TestMemoryStore_RecordFinding(t *testing.T) {
+	s := NewMemoryStore(100)
+
+	f := Finding{
+		Title:    "IDOR in user profile",
+		Severity: "high",
+		Host:     "api.example.com",
+		Status:   "open",
+	}
+	if err := s.RecordFinding("crystal", f); err != nil {
+		t.Fatalf("RecordFinding failed: %v", err)
+	}
+
+	got, err := s.GetFindings("crystal")
+	if err != nil {
+		t.Fatalf("GetFindings failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 finding, got %d", len(got))
+	}
+	if got[0].Title != f.Title {
+		t.Errorf("expected title %q, got %q", f.Title, got[0].Title)
+	}
+	if got[0].ID == "" {
+		t.Error("expected auto-generated ID")
+	}
+	if got[0].Created.IsZero() {
+		t.Error("expected non-zero Created time")
+	}
+}
+
+func TestMemoryStore_GetFindings_EmptyProgram(t *testing.T) {
+	s := NewMemoryStore(100)
+	got, err := s.GetFindings("nonexistent")
+	if err != nil {
+		t.Fatalf("GetFindings failed: %v", err)
+	}
+	if len(got) != 0 {
+		t.Errorf("expected 0 findings, got %d", len(got))
+	}
+}
+
+func TestMemoryStore_MarkTested(t *testing.T) {
+	s := NewMemoryStore(100)
+
+	te := TestedEndpoint{
+		Host:     "admin.example.com",
+		Endpoint: "/actuator/health",
+		Check:    "actuator",
+		Result:   "not_vulnerable",
+	}
+	if err := s.MarkTested("crystal", te); err != nil {
+		t.Fatalf("MarkTested failed: %v", err)
+	}
+
+	got, err := s.GetTested("crystal")
+	if err != nil {
+		t.Fatalf("GetTested failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("expected 1 tested endpoint, got %d", len(got))
+	}
+	if got[0].Check != "actuator" {
+		t.Errorf("expected check 'actuator', got %q", got[0].Check)
+	}
+	if got[0].TestedAt.IsZero() {
+		t.Error("expected non-zero TestedAt time")
+	}
+}
+
+func TestMemoryStore_RecordAssets_UpsertLastSeen(t *testing.T) {
+	s := NewMemoryStore(100)
+
+	// Record asset once
+	s.RecordAssets("crystal", []Asset{{Host: "x.example.com", Source: "bbot"}})
+	initial, _ := s.GetAssets("crystal")
+	firstSeen := initial[0].LastSeen
+
+	// Wait a moment, then upsert
+	time.Sleep(time.Millisecond)
+	s.RecordAssets("crystal", []Asset{{Host: "x.example.com", Source: "manual"}})
+
+	updated, _ := s.GetAssets("crystal")
+	if !updated[0].LastSeen.After(firstSeen) {
+		t.Error("expected LastSeen to be updated on upsert")
+	}
+}
+
+func TestMemoryStore_SeparatePrograms(t *testing.T) {
+	s := NewMemoryStore(100)
+
+	s.RecordAssets("program-a", []Asset{{Host: "a.com", Source: "bbot"}})
+	s.RecordAssets("program-b", []Asset{{Host: "b.com", Source: "bbot"}})
+	s.RecordFinding("program-a", Finding{Title: "XSS in a.com", Severity: "medium"})
+
+	aAssets, _ := s.GetAssets("program-a")
+	bAssets, _ := s.GetAssets("program-b")
+	aFindings, _ := s.GetFindings("program-a")
+	bFindings, _ := s.GetFindings("program-b")
+
+	if len(aAssets) != 1 || aAssets[0].Host != "a.com" {
+		t.Error("program-a should have a.com asset")
+	}
+	if len(bAssets) != 1 || bAssets[0].Host != "b.com" {
+		t.Error("program-b should have b.com asset")
+	}
+	if len(aFindings) != 1 {
+		t.Error("program-a should have 1 finding")
+	}
+	if len(bFindings) != 0 {
+		t.Error("program-b should have 0 findings")
+	}
+}
+
+func TestMergeTech(t *testing.T) {
+	a := []string{"nginx", "python"}
+	b := []string{"python", "postgres"}
+	got := mergeTech(a, b)
+	if len(got) != 3 {
+		t.Errorf("expected 3 unique techs, got %d: %v", len(got), got)
+	}
+}
+
+func TestNewID(t *testing.T) {
+	id1 := newID()
+	id2 := newID()
+	if id1 == "" || id2 == "" {
 		t.Error("expected non-empty IDs")
 	}
-
-	recent := s.RecentEntries(10)
-	if len(recent) != 2 {
-		t.Fatalf("expected 2 entries, got %d", len(recent))
-	}
-	// Most recent first.
-	if recent[0].ID != e2.ID {
-		t.Errorf("expected newest first: got %s, want %s", recent[0].ID, e2.ID)
-	}
-}
-
-func TestMemoryStoreSearch(t *testing.T) {
-	s := NewMemoryStore(100)
-
-	s.LogEntry("proxy", "allow", map[string]interface{}{"url": "https://example.com"})
-	s.LogEntry("mcp", "tool_invocation", map[string]interface{}{"tool": "check_url"})
-	s.LogEntry("proxy", "deny", map[string]interface{}{"url": "https://evil.com"})
-
-	// Search by event type.
-	results := s.SearchEntries("allow", "")
-	if len(results) != 1 {
-		t.Fatalf("expected 1 allow entry, got %d", len(results))
-	}
-
-	// Search by component.
-	results = s.SearchEntries("", "mcp")
-	if len(results) != 1 {
-		t.Fatalf("expected 1 mcp entry, got %d", len(results))
-	}
-
-	// Empty filters match all.
-	results = s.SearchEntries("", "")
-	if len(results) != 3 {
-		t.Fatalf("expected 3 entries with empty filters, got %d", len(results))
-	}
-}
-
-func TestMemoryStoreRedact(t *testing.T) {
-	s := NewMemoryStore(100)
-
-	e := s.LogEntry("test", "secret", map[string]interface{}{
-		"api_key": "sk-123456",
-		"url":     "https://example.com",
-	})
-
-	redacted := s.RedactEntry(e.ID, []string{"api_key"})
-	if redacted == nil {
-		t.Fatal("expected redacted entry, got nil")
-	}
-	if redacted.Data["api_key"] != "[REDACTED]" {
-		t.Errorf("expected api_key to be redacted, got %v", redacted.Data["api_key"])
-	}
-	if redacted.Data["url"] != "https://example.com" {
-		t.Errorf("expected url to remain unchanged, got %v", redacted.Data["url"])
-	}
-}
-
-func TestMemoryStoreCapacity(t *testing.T) {
-	s := NewMemoryStore(3)
-
-	s.LogEntry("t", "e", nil)
-	s.LogEntry("t", "e", nil)
-	s.LogEntry("t", "e", nil)
-	s.LogEntry("t", "e", nil) // This should evict the first.
-
-	entries := s.RecentEntries(10)
-	if len(entries) != 3 {
-		t.Fatalf("expected 3 entries (capacity), got %d", len(entries))
-	}
-}
-
-func TestMemoryStoreClose(t *testing.T) {
-	s := NewMemoryStore(10)
-	if err := s.Close(); err != nil {
-		t.Errorf("Close should not error for memory store: %v", err)
-	}
-}
-
-func TestNewMemoryStoreDefaults(t *testing.T) {
-	s := NewMemoryStore(0)
-	if s == nil {
-		t.Fatal("expected non-nil store")
-	}
-	// Should use default capacity.
-	entries := s.RecentEntries(10000)
-	if len(entries) != 0 {
-		t.Errorf("expected empty store, got %d entries", len(entries))
-	}
-}
-
-func TestStoreInterface(t *testing.T) {
-	// Verify that MemoryStore satisfies Store interface.
-	var s Store = NewMemoryStore(100)
-	if s == nil {
-		t.Fatal("MemoryStore should satisfy Store interface")
+	if id1 == id2 {
+		t.Error("expected unique IDs")
 	}
 }

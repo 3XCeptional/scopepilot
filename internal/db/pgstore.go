@@ -274,3 +274,27 @@ func scanEntries(rows pgx.Rows) []*audit.Entry {
 	}
 	return result
 }
+
+func (s *PGStore) RecordAssets(program string, assets []Asset) error {
+	return fmt.Errorf("PGStore: RecordAssets not implemented")
+}
+
+func (s *PGStore) GetAssets(program string) ([]Asset, error) {
+	return nil, fmt.Errorf("PGStore: GetAssets not implemented")
+}
+
+func (s *PGStore) RecordFinding(program string, finding Finding) error {
+	return fmt.Errorf("PGStore: RecordFinding not implemented")
+}
+
+func (s *PGStore) GetFindings(program string) ([]Finding, error) {
+	return nil, fmt.Errorf("PGStore: GetFindings not implemented")
+}
+
+func (s *PGStore) MarkTested(program string, te TestedEndpoint) error {
+	return fmt.Errorf("PGStore: MarkTested not implemented")
+}
+
+func (s *PGStore) GetTested(program string) ([]TestedEndpoint, error) {
+	return nil, fmt.Errorf("PGStore: GetTested not implemented")
+}
