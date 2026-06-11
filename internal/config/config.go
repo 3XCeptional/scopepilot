@@ -36,6 +36,7 @@ type GlobalConfig struct {
 	VPN        GlobalVPNConfig  `yaml:"vpn" json:"vpn"`
 	Sandbox    SandboxConfig    `yaml:"sandbox" json:"sandbox"`
 	LLM        LLMConfig        `yaml:"llm" json:"llm"`
+	Tools      ToolsConfig      `yaml:"tools" json:"tools"`
 	LogLevel   string           `yaml:"log_level" json:"log_level"`
 	LogFormat  string           `yaml:"log_format" json:"log_format"` // json or text
 }
@@ -84,6 +85,13 @@ type GlobalVPNConfig struct {
 	ContainerImage string `yaml:"container_image" json:"container_image"` // OCI image override
 	KillSwitch     bool   `yaml:"kill_switch" json:"kill_switch"`         // Block traffic if VPN drops
 	PodmanBinary   string `yaml:"podman_binary" json:"podman_binary"`     // Path to podman binary
+}
+
+// ToolsConfig defines paths to external scanning tools.
+type ToolsConfig struct {
+	BBOTPath     string `yaml:"bbot_path" json:"bbot_path"`
+	NucleiPath   string `yaml:"nuclei_path" json:"nuclei_path"`
+	TemplateDir  string `yaml:"template_dir" json:"template_dir"`
 }
 
 // SandboxConfig controls the malware sandbox.

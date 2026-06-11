@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
@@ -424,6 +425,26 @@ func validateProxyURL(raw string) error {
 		return fmt.Errorf("proxy URL must not contain credentials")
 	}
 	return nil
+}
+
+// DiscoverNucleiTemplates probes common locations for nuclei templates
+// in platform-appropriate order. Returns the first that exists, or "".
+func DiscoverNucleiTemplates() string {
+	paths := []string{
+		os.Getenv("NUCLEI_TEMPLATES"),
+		filepath.Join(os.Getenv("HOME"), "nuclei-templates"),
+		filepath.Join(os.Getenv("HOME"), "Library", "Application Support", "nuclei-templates"),
+		"/home/nuclei-templates",
+	}
+	for _, p := range paths {
+		if p == "" {
+			continue
+		}
+		if fi, err := os.Stat(p); err == nil && fi.IsDir() {
+			return p
+		}
+	}
+	return ""
 }
 
 func proxyEnvironment(proxyURL string) []string {
