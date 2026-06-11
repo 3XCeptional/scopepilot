@@ -22,6 +22,9 @@ go install github.com/dhiren/pentest-automation/cmd/pentest@latest
 
 # Or download a static binary from GitHub Releases
 curl -sSL https://github.com/dhiren/pentest-automation/releases/latest/download/scopepilot_linux_amd64.tar.gz | tar xz
+
+# Container — pull the published image from GitHub Container Registry
+podman pull ghcr.io/dhiren/scopepilot:latest
 ```
 
 **No Docker or Podman required** to run the gate. Single static binary.
@@ -173,6 +176,44 @@ All services run in rootless Podman containers on Apple Silicon (arm64):
 - Read-only root filesystem (scopepilot)
 - CPU limit: 0.5, Memory limit: 256MB
 - Internal bridge network (no external gateway)
+
+### Compose (using published image)
+
+To run from the published GHCR image instead of building locally, replace
+the `build:` block in `compose.yaml` with the `image:` field:
+
+```yaml
+  scopepilot:
+    image: ghcr.io/dhiren/scopepilot:latest
+    ports:
+      - "127.0.0.1:8443:8443"
+      - "127.0.0.1:9090:9090"
+    expose:
+      - "8443"
+      - "9090"
+    networks:
+      - scopepilot-net
+      - scopepilot-data
+    volumes:
+      - ./config:/etc/scopepilot:ro
+    read_only: true
+    cap_drop:
+      - ALL
+    security_opt:
+      - no-new-privileges:true
+    restart: unless-stopped
+    environment:
+      SCOPEPILOT_MCP_API_KEY: ${SCOPEPILOT_MCP_API_KEY:?set SCOPEPILOT_MCP_API_KEY}
+      SCOPEPILOT_DEACTIVATION_TOKEN: ${SCOPEPILOT_DEACTIVATION_TOKEN:-}
+      SCOPEPILOT_GATE_APPROVAL_TOKEN: ${SCOPEPILOT_GATE_APPROVAL_TOKEN:-}
+    healthcheck:
+      test: ["CMD", "/scopepilot", "health", "--proxy-url=http://127.0.0.1:8443", "--mcp-url=http://127.0.0.1:9090"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    command: ["server", "--config=/etc/scopepilot/config.yaml", "--listen-proxy=:8443", "--listen-mcp=:9090"]
+```
 
 ## Development
 
