@@ -499,15 +499,21 @@ func proxyEnvironment(proxyURL string) []string {
 	)
 }
 
-// bbotArgs returns the CLI args for a BBOT discovery run.
-// Uses the most recent BBOT v2.x flags (passive-only via -rf passive).
+// bbotArgs returns the CLI args for a BBOT discovery run, selecting
+// flags appropriate for the detected BBOT version.
 func bbotArgs(targets []string, proxyURL string, noProxy bool) []string {
+	version := detectBBOTVersion("bbot")
 	args := []string{
 		"-t", strings.Join(targets, ","),
-		"-rf", "passive",
 		"-y",
 		"-o", "-",
-		"-om", "json",
+	}
+	if version < 2 && version > 0 {
+		// BBOT v1.x: use old flag names
+		args = append(args, "--passive-only", "--no-dns", "--no-www", "--force", "-o", "json")
+	} else {
+		// BBOT v2.x+ (or unknown — assume v2): use current flags
+		args = append(args, "-rf", "passive", "-om", "json")
 	}
 	if !noProxy && proxyURL != "" {
 		args = append(args, "--proxy", proxyURL)
@@ -515,12 +521,17 @@ func bbotArgs(targets []string, proxyURL string, noProxy bool) []string {
 	return args
 }
 
-// nucleiArgs returns the CLI args for a Nuclei scan run.
-// Uses -jsonl (v3.x) which is also supported by v2.x.
+// nucleiArgs returns the CLI args for a Nuclei scan run, selecting
+// flags appropriate for the detected Nuclei version.
 func nucleiArgs(templateDir string, targets []string) []string {
+	version := detectNucleiVersion("nuclei")
+	jsonFlag := "-jsonl"
+	if version < 3 && version > 0 {
+		jsonFlag = "-json" // Nuclei v2.x
+	}
 	args := []string{
 		"-t", templateDir,
-		"-jsonl",
+		jsonFlag,
 		"-o", "-",
 		"--no-httpx",
 		"--bulk-size", "5",

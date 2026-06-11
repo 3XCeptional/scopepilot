@@ -1,6 +1,12 @@
 package adapter
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 )
@@ -147,4 +153,173 @@ func TestNucleiArgsNoDeprecatedFlags(t *testing.T) {
 	if strings.Contains(argStr, "-json ") {
 		t.Errorf("nuclei args contain deprecated -json flag: %s", args)
 	}
+}
+
+func TestBBOTConfig_DryRun(t *testing.T) {
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result := SafeCheckResult{URL: "https://app.example.com/", Allowed: true}
+		resp := map[string]interface{}{"jsonrpc": "2.0", "result": result, "id": 1}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer mcpServer.Close()
+
+	client := NewMCPClient(mcpServer.URL, "test-prog")
+	cfg := BBOTConfig{
+		BinaryPath: "bbot",
+		MCPClient:  client,
+		DryRun:     true,
+		Timeout:    10,
+	}
+
+	ctx := context.Background()
+	result, err := RunBBOT(ctx, cfg, []string{"app.example.com"})
+	if err != nil {
+		t.Fatalf("RunBBOT dry run failed: %v", err)
+	}
+	if !result.DryRun {
+		t.Error("expected dry_run=true")
+	}
+	if result.TargetsScanned != 1 {
+		t.Errorf("expected 1 target scanned, got %d", result.TargetsScanned)
+	}
+	if result.TargetsBlocked != 0 {
+		t.Errorf("expected 0 blocked, got %d", result.TargetsBlocked)
+	}
+}
+
+func TestNucleiConfig_DryRun(t *testing.T) {
+	mcpServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		result := SafeCheckResult{URL: "https://app.example.com/", Allowed: true}
+		resp := map[string]interface{}{"jsonrpc": "2.0", "result": result, "id": 1}
+		json.NewEncoder(w).Encode(resp)
+	}))
+	defer mcpServer.Close()
+
+	client := NewMCPClient(mcpServer.URL, "test-prog")
+	cfg := NucleiConfig{
+		BinaryPath:  "nuclei",
+		MCPClient:   client,
+		DryRun:      true,
+		Timeout:     10,
+		TemplateDir: "/templates",
+	}
+
+	ctx := context.Background()
+	result, err := RunNuclei(ctx, cfg, []string{"app.example.com"})
+	if err != nil {
+		t.Fatalf("RunNuclei dry run failed: %v", err)
+	}
+	if !result.DryRun {
+		t.Error("expected dry_run=true")
+	}
+	if result.TargetsScanned != 1 {
+		t.Errorf("expected 1 target scanned, got %d", result.TargetsScanned)
+	}
+}
+
+func TestRunBBOT_RequiresProxyForExecution(t *testing.T) {
+	client, closeServer := allowAllMCPClient(t)
+	defer closeServer()
+
+	_, err := RunBBOT(context.Background(), BBOTConfig{
+		BinaryPath: "/bin/false",
+		MCPClient:  client,
+	}, []string{"app.example.com"})
+	if err == nil || !strings.Contains(err.Error(), "proxy") {
+		t.Fatalf("expected proxy configuration error, got %v", err)
+	}
+}
+
+func TestRunNuclei_RequiresProxyForExecution(t *testing.T) {
+	client, closeServer := allowAllMCPClient(t)
+	defer closeServer()
+
+	_, err := RunNuclei(context.Background(), NucleiConfig{
+		BinaryPath:  "/bin/false",
+		MCPClient:   client,
+		TemplateDir: "/templates",
+	}, []string{"app.example.com"})
+	if err == nil || !strings.Contains(err.Error(), "proxy") {
+		t.Fatalf("expected proxy configuration error, got %v", err)
+	}
+}
+
+func TestRunBBOT_RejectsUnsupportedVPNNamespace(t *testing.T) {
+	client, closeServer := allowAllMCPClient(t)
+	defer closeServer()
+
+	_, err := RunBBOT(context.Background(), BBOTConfig{
+		BinaryPath:   "/bin/false",
+		MCPClient:    client,
+		ProxyURL:     "http://127.0.0.1:8443",
+		VPNContainer: "scopepilot-vpn",
+	}, []string{"app.example.com"})
+	if err == nil || !strings.Contains(err.Error(), "VPN") {
+		t.Fatalf("expected fail-closed VPN error, got %v", err)
+	}
+}
+
+func TestRunNuclei_PropagatesProxyEnvironment(t *testing.T) {
+	client, closeServer := allowAllMCPClient(t)
+	defer closeServer()
+
+	script := filepath.Join(t.TempDir(), "nuclei")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s|%s|%s|%s' \"$HTTP_PROXY\" \"$HTTPS_PROXY\" \"$ALL_PROXY\" \"$NO_PROXY\"\n"), 0700); err != nil {
+		t.Fatalf("write fake nuclei: %v", err)
+	}
+
+	result, err := RunNuclei(context.Background(), NucleiConfig{
+		BinaryPath:  script,
+		MCPClient:   client,
+		TemplateDir: "/templates",
+		ProxyURL:    "http://127.0.0.1:8443",
+	}, []string{"app.example.com"})
+	if err != nil {
+		t.Fatalf("RunNuclei failed: %v", err)
+	}
+	want := "http://127.0.0.1:8443|http://127.0.0.1:8443|http://127.0.0.1:8443|"
+	if result.RawOutput != want {
+		t.Fatalf("unexpected proxy environment: got %q want %q", result.RawOutput, want)
+	}
+}
+
+func TestRunNuclei_UsesLowImpactDefaults(t *testing.T) {
+	client, closeServer := allowAllMCPClient(t)
+	defer closeServer()
+
+	script := filepath.Join(t.TempDir(), "nuclei")
+	if err := os.WriteFile(script, []byte("#!/bin/sh\nprintf '%s' \"$*\"\n"), 0700); err != nil {
+		t.Fatalf("write fake nuclei: %v", err)
+	}
+
+	result, err := RunNuclei(context.Background(), NucleiConfig{
+		BinaryPath:  script,
+		MCPClient:   client,
+		TemplateDir: "/templates",
+		ProxyURL:    "http://127.0.0.1:8443",
+	}, []string{"app.example.com"})
+	if err != nil {
+		t.Fatalf("RunNuclei failed: %v", err)
+	}
+	for _, expected := range []string{
+		"-severity info,low",
+		"-exclude-tags fuzz,dos,headless,code",
+		"-proxy http://127.0.0.1:8443",
+	} {
+		if !strings.Contains(result.RawOutput, expected) {
+			t.Fatalf("expected %q in args: %s", expected, result.RawOutput)
+		}
+	}
+}
+
+func allowAllMCPClient(t *testing.T) (*MCPClient, func()) {
+	t.Helper()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"jsonrpc": "2.0",
+			"result":  SafeCheckResult{URL: "https://app.example.com", Allowed: true},
+			"id":      1,
+		})
+	}))
+	return NewMCPClient(server.URL, "test-prog"), server.Close
 }
