@@ -547,14 +547,14 @@ func bbotArgs(targets []string, proxyURL string, noProxy bool, version int) []st
 	args := []string{
 		"-t", strings.Join(targets, ","),
 		"-y",
-		"-o", "-",
 	}
 	if version < 2 && version > 0 {
-		// BBOT v1.x: use old flag names
-		args = append(args, "--passive-only", "--no-dns", "--no-www", "--force", "-o", "json")
+		// BBOT v1.x: use old flag names. Output to directory "json"
+		// (this was the original v1 behavior — stdout was not used).
+		args = append(args, "-o", "json", "--passive-only", "--no-dns", "--no-www", "--force")
 	} else {
-		// BBOT v2.x+ (or unknown — assume v2): use current flags
-		args = append(args, "-rf", "passive", "-om", "json")
+		// BBOT v2.x+ (or unknown — assume v2): use current flags, JSON lines to stdout.
+		args = append(args, "-o", "-", "-rf", "passive", "-om", "json")
 	}
 	if !noProxy && proxyURL != "" {
 		args = append(args, "--proxy", proxyURL)

@@ -61,6 +61,17 @@ func TestBBOTArgs(t *testing.T) {
 	if !hasYes {
 		t.Error("bbotArgs: missing -y non-interactive flag")
 	}
+
+	// Exactly one -o flag (no duplicate from base + branch)
+	oCount := 0
+	for _, a := range args {
+		if a == "-o" {
+			oCount++
+		}
+	}
+	if oCount != 1 {
+		t.Errorf("bbotArgs: expected exactly 1 -o flag, got %d", oCount)
+	}
 }
 
 func TestNucleiArgs(t *testing.T) {
@@ -186,6 +197,16 @@ func TestBBOTArgs_Version1(t *testing.T) {
 		if strings.Contains(argStr, bad) {
 			t.Errorf("bbotArgs(v1): unexpected v2 flag %q in v1 args: %s", bad, argStr)
 		}
+	}
+	// v1 must have exactly one -o flag (no duplicate from base + branch)
+	oCount := 0
+	for _, a := range args {
+		if a == "-o" {
+			oCount++
+		}
+	}
+	if oCount != 1 {
+		t.Errorf("bbotArgs(v1): expected exactly 1 -o flag, got %d. Args: %s", oCount, argStr)
 	}
 }
 
