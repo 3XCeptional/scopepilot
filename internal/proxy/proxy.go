@@ -53,8 +53,6 @@ type Proxy struct {
 	*killswitch.Switch
 	Config
 
-	// ca is the root Certificate Authority used for TLS MitM decryption.
-	ca *CA
 
 	// httpClient is used to forward allowed requests. It includes a
 	// CheckRedirect that re-validates redirect targets against all safety
@@ -785,19 +783,6 @@ func (p *Proxy) writeHealth(w http.ResponseWriter) {
 	}
 }
 
-// getCA returns the CA instance, initializing it lazily if necessary.
-func (p *Proxy) getCA() (*CA, error) {
-	p.mu.Lock()
-	defer p.mu.Unlock()
-	if p.ca == nil {
-		ca, err := NewCA()
-		if err != nil {
-			return nil, err
-		}
-		p.ca = ca
-	}
-	return p.ca, nil
-}
 
 // handleConnect services a CONNECT request by validating the CONNECT target
 // (host/port against scope and AllowedPorts, blocked-IP and DNS-rebind checks,
@@ -988,76 +973,6 @@ func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 
 	wg.Wait()
 	log.Printf("[connect] CLOSE %s (up: %d down: %d bytes)", authority, upBytes, downBytes)
-}
-
-// ForwardDecryptedRequest forwards a decrypted HTTP request and writes the response back to the client connection.
-func (p *Proxy) ForwardDecryptedRequest(conn net.Conn, r *http.Request) error {
-	// Build the outgoing request.
-	targetURL := r.URL.String()
-	outReq, err := http.NewRequestWithContext(r.Context(), r.Method, targetURL, r.Body)
-	if err != nil {
-		resp := &http.Response{
-			StatusCode: http.StatusForbidden,
-			ProtoMajor: 1,
-			ProtoMinor: 1,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"allowed":false,"reason":"failed to create outgoing request: %v"}`, err))),
-		}
-		resp.Header.Set("Content-Type", "application/json")
-		return resp.Write(conn)
-	}
-
-	// Copy headers.
-	for key, values := range r.Header {
-		for _, val := range values {
-			outReq.Header.Add(key, val)
-		}
-	}
-
-	// Send the request.
-	resp, err := p.httpClient.Do(outReq)
-	if err != nil {
-		respBlock := &http.Response{
-			StatusCode: http.StatusForbidden,
-			ProtoMajor: 1,
-			ProtoMinor: 1,
-			Header:     make(http.Header),
-			Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"allowed":false,"reason":"forward error: %v"}`, err))),
-		}
-		respBlock.Header.Set("Content-Type", "application/json")
-		return respBlock.Write(conn)
-	}
-	defer resp.Body.Close()
-
-	// Redact sensitive headers from response.
-	RedactResponseHeaders(resp.Header)
-
-	// Write response to the connection.
-	return resp.Write(conn)
-}
-
-func writeDenyResp(conn net.Conn, reason string) {
-	resp := &http.Response{
-		StatusCode: http.StatusForbidden,
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"allowed":false,"reason":"%s"}`, reason))),
-	}
-	resp.Header.Set("Content-Type", "application/json")
-	resp.Write(conn)
-}
-
-func writeDryRunResp(conn net.Conn, host, url string) {
-	resp := &http.Response{
-		StatusCode: http.StatusOK,
-		ProtoMajor: 1,
-		ProtoMinor: 1,
-		Header:     make(http.Header),
-		Body:       io.NopCloser(strings.NewReader(fmt.Sprintf(`{"allowed":true,"dry_run":true,"reason":"request would be allowed","host":"%s","url":"%s"}`, host, url))),
-	}
-	resp.Header.Set("Content-Type", "application/json")
-	resp.Write(conn)
 }
 
 // ---------------------------------------------------------------------------

@@ -79,6 +79,21 @@ Attacker sends CONNECT to out-of-scope-host:443
   └── [MITIGATED] Full safety chain runs before tunnel
 ```
 
+### A4: Path-Level Scope Bypass via HTTPS CONNECT
+
+All CONNECT tunnel traffic is relayed verbatim after the tunnel is
+established. Inside an HTTPS tunnel:
+- The proxy cannot see individual HTTP requests (TLS encryption)
+- Path-prefix exclusions do not apply
+- Per-host rate limiting does NOT apply to traffic inside the tunnel
+  (only the initial CONNECT handshake is rate-limited)
+- Once a tunnel to an in-scope host is established, any traffic inside
+  it passes through unrestricted
+
+This is a documented **architectural limitation**, not a bug. Full
+per-request filtering would require TLS interception with a
+client-trusted CA, which is intentionally out of scope.
+
 ## Security Controls Mapping
 
 | Control | Location | MITRE ATT&CK |

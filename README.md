@@ -145,8 +145,12 @@ requests require `Authorization: Bearer $SCOPEPILOT_MCP_API_KEY`.
 10. **Redirect revalidation** — every redirect target re-checked through entire chain
 11. **Audit log** — every allow/deny recorded
 12. **Response redaction** — Authorization, Cookie, Set-Cookie headers stripped
-13. **HTTPS CONNECT tunnel** — full safety chain applies to CONNECT too.
-    Path-prefix exclusions cannot apply to CONNECT (TLS hides the path).
+13. **HTTPS CONNECT tunnel** — host/port scope-gated. Once a tunnel is
+    established, traffic inside it is relayed verbatim — it is a CONNECT
+    allowlist, NOT a per-request filter. **Path-prefix exclusions and
+    per-host rate limiting do not apply inside an established HTTPS tunnel.**
+    Full per-request filtering would require TLS interception with a
+    client-trusted CA, which is intentionally out of scope.
     Documented limitation; host, port, IP, rate-limit checks still apply.
 
 The proxy accepts HTTPS CONNECT tunneling. Set your `https_proxy` to the
