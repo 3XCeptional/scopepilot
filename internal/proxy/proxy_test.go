@@ -729,3 +729,26 @@ func TestCheckURL_AllowedPublicIPs(t *testing.T) {
 		})
 	}
 }
+
+func TestStripHopByHopHeaders_ConnectionTokens(t *testing.T) {
+	h := http.Header{}
+	h.Set("Connection", "X-Custom, X-Other")
+	h.Set("X-Custom", "secret")
+	h.Set("X-Other", "secret2")
+	h.Set("X-Keep", "keep")
+
+	stripHopByHopHeaders(h)
+
+	if h.Get("Connection") != "" {
+		t.Errorf("Connection header should be stripped")
+	}
+	if h.Get("X-Custom") != "" {
+		t.Errorf("X-Custom named in Connection should be stripped, got %q", h.Get("X-Custom"))
+	}
+	if h.Get("X-Other") != "" {
+		t.Errorf("X-Other named in Connection should be stripped, got %q", h.Get("X-Other"))
+	}
+	if h.Get("X-Keep") != "keep" {
+		t.Errorf("X-Keep should be preserved, got %q", h.Get("X-Keep"))
+	}
+}

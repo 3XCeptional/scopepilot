@@ -538,6 +538,16 @@ func (p *Proxy) validateRedirectTarget(targetURL *url.URL) error {
 
 // stripHopByHopHeaders removes hop-by-hop headers per RFC 7230 §6.1.
 func stripHopByHopHeaders(h http.Header) {
+	// Per RFC 7230 §6.1, the Connection header lists additional header names
+	// that are connection-specific and must also be stripped. Read and delete
+	// those named headers BEFORE deleting Connection itself.
+	for _, connVal := range h.Values("Connection") {
+		for _, token := range strings.Split(connVal, ",") {
+			if name := strings.TrimSpace(token); name != "" {
+				h.Del(name)
+			}
+		}
+	}
 	hopByHop := []string{
 		"Connection", "Keep-Alive", "Proxy-Authenticate", "Proxy-Authorization",
 		"TE", "Trailer", "Transfer-Encoding", "Upgrade",
@@ -545,10 +555,6 @@ func stripHopByHopHeaders(h http.Header) {
 	for _, name := range hopByHop {
 		h.Del(name)
 	}
-	for _, connHeader := range h.Values("Connection") {
-		h.Del(connHeader)
-	}
-	h.Del("Connection")
 }
 
 // RedactResponseHeaders removes sensitive headers (Authorization, Cookie,
@@ -790,9 +796,14 @@ func (p *Proxy) getCA() (*CA, error) {
 	return p.ca, nil
 }
 
-// handleConnect services a CONNECT request by hijacking the connection, performing
-// a TLS MitM handshake using a dynamically-issued certificate, and decrypting/filtering
-// HTTPS requests in a loop.
+// handleConnect services a CONNECT request by validating the CONNECT target
+// (host/port against scope and AllowedPorts, blocked-IP and DNS-rebind checks,
+// pinning the resolved IPs) and then raw-relaying bytes bidirectionally between
+// client and upstream. It does NOT perform TLS interception or per-request
+// filtering: once a tunnel to an in-scope host is approved, traffic inside it is
+// relayed verbatim. Path-prefix exclusions and per-host rate limiting do NOT
+// apply to requests sent inside an HTTPS tunnel — for TLS this is a CONNECT
+// allowlist, not a request filter.
 func (p *Proxy) handleConnect(w http.ResponseWriter, r *http.Request) {
 	authority := r.Host
 	if authority == "" {
