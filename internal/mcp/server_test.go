@@ -81,6 +81,10 @@ func TestListTools_ReturnsExpectedTools(t *testing.T) {
 		"run_safe_check":         false,
 		"validate_hosts":         false,
 		"health":                 false,
+		"recall_engagement":      false,
+		"record_assets":          false,
+		"record_finding":         false,
+		"mark_tested":            false,
 	}
 
 	for _, tool := range tools {
@@ -652,6 +656,271 @@ func TestCallTool_Health(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
+// recall_engagement
+// ---------------------------------------------------------------------------
+
+func TestCallTool_RecallEngagement_Empty(t *testing.T) {
+	srv := testServer()
+	result, err := srv.CallToolContext(context.Background(), "recall_engagement", map[string]interface{}{
+		"program": "test-program-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if r["program"] != "test-program-1" {
+		t.Errorf("expected program 'test-program-1', got %v", r["program"])
+	}
+	assets, _ := r["assets"].([]interface{})
+	if len(assets) != 0 {
+		t.Errorf("expected 0 assets for fresh program, got %d", len(assets))
+	}
+	findings, _ := r["findings"].([]interface{})
+	if len(findings) != 0 {
+		t.Errorf("expected 0 findings for fresh program, got %d", len(findings))
+	}
+	tested, _ := r["tested_endpoints"].([]interface{})
+	if len(tested) != 0 {
+		t.Errorf("expected 0 tested endpoints for fresh program, got %d", len(tested))
+	}
+}
+
+func TestCallTool_RecallEngagement_WithData(t *testing.T) {
+	srv := testServer()
+
+	// Seed data.
+	_, err := srv.CallToolContext(context.Background(), "record_assets", map[string]interface{}{
+		"program": "prog-1",
+		"hosts":   []interface{}{"app.example.com", "api.example.com"},
+		"source":  "bbot",
+	})
+	if err != nil {
+		t.Fatalf("seed assets failed: %v", err)
+	}
+	_, err = srv.CallToolContext(context.Background(), "record_finding", map[string]interface{}{
+		"program":  "prog-1",
+		"host":     "app.example.com",
+		"title":    "XSS in login",
+		"severity": "high",
+	})
+	if err != nil {
+		t.Fatalf("seed finding failed: %v", err)
+	}
+	_, err = srv.CallToolContext(context.Background(), "mark_tested", map[string]interface{}{
+		"program":  "prog-1",
+		"host":     "app.example.com",
+		"endpoint": "/login",
+		"check":    "xss",
+		"result":   "not_vulnerable",
+	})
+	if err != nil {
+		t.Fatalf("seed mark_tested failed: %v", err)
+	}
+
+	// Now recall.
+	result, err := srv.CallToolContext(context.Background(), "recall_engagement", map[string]interface{}{
+		"program": "prog-1",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+
+	assets, _ := r["assets"].([]interface{})
+	if len(assets) != 2 {
+		t.Errorf("expected 2 assets, got %d", len(assets))
+	}
+	findings, _ := r["findings"].([]interface{})
+	if len(findings) != 1 {
+		t.Errorf("expected 1 finding, got %d", len(findings))
+	}
+	tested, _ := r["tested_endpoints"].([]interface{})
+	if len(tested) != 1 {
+		t.Errorf("expected 1 tested endpoint, got %d", len(tested))
+	}
+}
+
+func TestCallTool_RecallEngagement_MissingProgram(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "recall_engagement", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing program, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// record_assets
+// ---------------------------------------------------------------------------
+
+func TestCallTool_RecordAssets_Records(t *testing.T) {
+	srv := testServer()
+	result, rpcErr := srv.CallToolContext(context.Background(), "record_assets", map[string]interface{}{
+		"program": "test-program-1",
+		"hosts":   []interface{}{"host1.example.com", "host2.example.com"},
+		"source":  "manual",
+	})
+	if rpcErr != nil {
+		t.Fatalf("unexpected error: %v", rpcErr)
+	}
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if r["program"] != "test-program-1" {
+		t.Errorf("expected program 'test-program-1', got %v", r["program"])
+	}
+	if n, _ := r["recorded"].(int); n != 2 {
+		// In case JSON round-trip converts to float64
+		if nf, ok := r["recorded"].(float64); !ok || int(nf) != 2 {
+			t.Errorf("expected recorded=2, got %v (type %T)", r["recorded"], r["recorded"])
+		}
+	}
+}
+
+func TestCallTool_RecordAssets_EmptyHosts(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "record_assets", map[string]interface{}{
+		"program": "p",
+		"hosts":   []interface{}{},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty hosts, got nil")
+	}
+}
+
+func TestCallTool_RecordAssets_MissingProgram(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "record_assets", map[string]interface{}{
+		"hosts": []interface{}{"h.com"},
+	})
+	if err == nil {
+		t.Fatal("expected error for missing program, got nil")
+	}
+}
+
+func TestCallTool_RecordAssets_InvalidElement(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "record_assets", map[string]interface{}{
+		"program": "p",
+		"hosts":   []interface{}{"good.com", 42},
+	})
+	if err == nil || !strings.Contains(err.Error(), "strings") {
+		t.Fatalf("expected invalid element error, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// record_finding
+// ---------------------------------------------------------------------------
+
+func TestCallTool_RecordFinding_Success(t *testing.T) {
+	srv := testServer()
+	result, err := srv.CallToolContext(context.Background(), "record_finding", map[string]interface{}{
+		"program":  "test-program-1",
+		"host":     "app.example.com",
+		"title":    "Open S3 Bucket",
+		"severity": "high",
+		"poc_ref":  "https://console.aws.amazon.com/s3/buckets/bucket",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if r["status"] != "recorded" {
+		t.Errorf("expected status 'recorded', got %v", r["status"])
+	}
+	fid, _ := r["finding_id"].(string)
+	if fid == "" {
+		t.Errorf("expected non-empty finding_id")
+	}
+}
+
+func TestCallTool_RecordFinding_MissingRequired(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "record_finding", map[string]interface{}{
+		"program": "p",
+		"host":    "h.com",
+		"title":   "test",
+	}) // missing severity
+	if err == nil {
+		t.Fatal("expected error for missing severity, got nil")
+	}
+}
+
+func TestCallTool_RecordFinding_InvalidSeverity(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "record_finding", map[string]interface{}{
+		"program":  "p",
+		"host":     "h.com",
+		"title":    "test",
+		"severity": "bogus",
+	})
+	if err == nil || !strings.Contains(err.Error(), "severity") {
+		t.Fatalf("expected severity validation error, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// mark_tested
+// ---------------------------------------------------------------------------
+
+func TestCallTool_MarkTested_Success(t *testing.T) {
+	srv := testServer()
+	result, err := srv.CallToolContext(context.Background(), "mark_tested", map[string]interface{}{
+		"program":  "test-program-1",
+		"host":     "app.example.com",
+		"endpoint": "/admin",
+		"check":    "idor",
+		"result":   "not_vulnerable",
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+	if r["status"] != "recorded" {
+		t.Errorf("expected status 'recorded', got %v", r["status"])
+	}
+}
+
+func TestCallTool_MarkTested_InvalidResult(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "mark_tested", map[string]interface{}{
+		"program":  "p",
+		"host":     "h.com",
+		"endpoint": "/",
+		"check":    "xss",
+		"result":   "maybe",
+	})
+	if err == nil || !strings.Contains(err.Error(), "result") {
+		t.Fatalf("expected result validation error, got %v", err)
+	}
+}
+
+func TestCallTool_MarkTested_MissingParams(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "mark_tested", map[string]interface{}{
+		"program": "p",
+		"host":    "h.com",
+	}) // missing endpoint, check, result
+	if err == nil {
+		t.Fatal("expected error for missing params, got nil")
+	}
+}
+
+// ---------------------------------------------------------------------------
 // HTTP handler (JSON-RPC 2.0)
 // ---------------------------------------------------------------------------
 
@@ -832,8 +1101,8 @@ func TestHTTPServeHTTP_ListTools(t *testing.T) {
 	if resp.ID != 1 {
 		t.Errorf("expected id 1, got %v", resp.ID)
 	}
-	if len(resp.Result) != 11 {
-		t.Errorf("expected 11 tools, got %d", len(resp.Result))
+	if len(resp.Result) != 15 {
+		t.Errorf("expected 15 tools, got %d", len(resp.Result))
 	}
 }
 

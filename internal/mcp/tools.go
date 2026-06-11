@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
+	"github.com/dhiren/pentest-automation/internal/db"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
 	"github.com/dhiren/pentest-automation/internal/proxy"
 )
@@ -285,6 +286,173 @@ func (s *Server) ListTools() []ToolDef {
 				},
 			},
 		},
+		{
+			Name:        "recall_engagement",
+			Description: "Returns prior assets, findings, and tested endpoints for a program. Use this at the start of a hunt session so the agent resumes from where it left off.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"program": map[string]interface{}{
+						"type":        "string",
+						"description": "The program ID to recall engagement data for.",
+					},
+				},
+				"required":             []string{"program"},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"program": map[string]interface{}{"type": "string"},
+					"assets": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"host":       map[string]interface{}{"type": "string"},
+								"source":     map[string]interface{}{"type": "string"},
+								"first_seen": map[string]interface{}{"type": "string"},
+								"last_seen":  map[string]interface{}{"type": "string"},
+								"in_scope":   map[string]interface{}{"type": "boolean"},
+							},
+						},
+					},
+					"findings": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"id":       map[string]interface{}{"type": "string"},
+								"host":     map[string]interface{}{"type": "string"},
+								"title":    map[string]interface{}{"type": "string"},
+								"severity": map[string]interface{}{"type": "string"},
+								"status":   map[string]interface{}{"type": "string"},
+							},
+						},
+					},
+					"tested_endpoints": map[string]interface{}{
+						"type": "array",
+						"items": map[string]interface{}{
+							"type": "object",
+							"properties": map[string]interface{}{
+								"host":     map[string]interface{}{"type": "string"},
+								"endpoint": map[string]interface{}{"type": "string"},
+								"check":    map[string]interface{}{"type": "string"},
+								"result":   map[string]interface{}{"type": "string"},
+							},
+						},
+					},
+				},
+			},
+		},
+		{
+			Name:        "record_assets",
+			Description: "Records a batch of discovered hostnames for a program. Used by recon tools to persist subdomain/enumeration results so the agent can track coverage and avoid re-scanning.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"program": map[string]interface{}{
+						"type":        "string",
+						"description": "The program ID these assets belong to.",
+					},
+					"hosts": map[string]interface{}{
+						"type":        "array",
+						"description": "List of hostnames discovered.",
+						"items":       map[string]interface{}{"type": "string"},
+						"minItems":    float64(1),
+						"maxItems":    float64(1000),
+					},
+					"source": map[string]interface{}{
+						"type":        "string",
+						"description": "Source of the discovery (e.g. bbot, nuclei, manual). Optional.",
+					},
+				},
+				"required":             []string{"program", "hosts"},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"program":  map[string]interface{}{"type": "string"},
+					"recorded": map[string]interface{}{"type": "integer"},
+				},
+			},
+		},
+		{
+			Name:        "record_finding",
+			Description: "Records a security finding for a program. Findings are persisted and returned by recall_engagement for later analysis and reporting.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"program": map[string]interface{}{
+						"type":        "string",
+						"description": "The program ID this finding belongs to.",
+					},
+					"host": map[string]interface{}{
+						"type":        "string",
+						"description": "The affected hostname.",
+					},
+					"title": map[string]interface{}{
+						"type":        "string",
+						"description": "Finding title (e.g. 'Open S3 Bucket', 'XSS in login').",
+					},
+					"severity": map[string]interface{}{
+						"type":        "string",
+						"description": "Severity level: critical, high, medium, low, info.",
+					},
+					"poc_ref": map[string]interface{}{
+						"type":        "string",
+						"description": "Optional reference or evidence (URL, curl command, screenshot path).",
+					},
+				},
+				"required":             []string{"program", "host", "title", "severity"},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"finding_id": map[string]interface{}{"type": "string"},
+					"status":     map[string]interface{}{"type": "string"},
+				},
+			},
+		},
+		{
+			Name:        "mark_tested",
+			Description: "Records that a specific endpoint was tested with a particular check and the result. Use this after each nuclei/bbot check so the agent can avoid re-testing and track coverage.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"program": map[string]interface{}{
+						"type":        "string",
+						"description": "The program ID.",
+					},
+					"host": map[string]interface{}{
+						"type":        "string",
+						"description": "The hostname that was tested.",
+					},
+					"endpoint": map[string]interface{}{
+						"type":        "string",
+						"description": "The full URL or path that was tested (e.g. https://host.com/admin or /api/users).",
+					},
+					"check": map[string]interface{}{
+						"type":        "string",
+						"description": "What check was run (e.g. nuclei template ID like 'tech-detect', or 'scope_check').",
+					},
+					"result": map[string]interface{}{
+						"type":        "string",
+						"description": "Outcome: not_vulnerable, vulnerable, error, timeout, skipped.",
+					},
+				},
+				"required":             []string{"program", "host", "endpoint", "check", "result"},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"status": map[string]interface{}{"type": "string"},
+				},
+			},
+		},
 	}
 
 	s.mu.RLock()
@@ -464,6 +632,18 @@ func (s *Server) callTool(ctx context.Context, name string, params map[string]in
 
 	case "health":
 		result = s.handleHealth()
+
+	case "recall_engagement":
+		result, err = s.handleRecallEngagement(params)
+
+	case "record_assets":
+		result, err = s.handleRecordAssets(params)
+
+	case "record_finding":
+		result, err = s.handleRecordFinding(params)
+
+	case "mark_tested":
+		result, err = s.handleMarkTested(params)
 
 	default:
 		return nil, fmt.Errorf("unknown tool: %q", name)
@@ -726,4 +906,190 @@ func (s *Server) handleHealth() map[string]interface{} {
 		"program_id":  s.prx.ProgramID,
 		"kill_switch": s.ks.IsActive(),
 	}
+}
+
+// --- Track-D: engagement memory tools ---
+
+func (s *Server) handleRecallEngagement(params map[string]interface{}) (map[string]interface{}, error) {
+	program, _ := params["program"].(string)
+	if program == "" {
+		return nil, fmt.Errorf("parameter 'program' must be a non-empty string")
+	}
+
+	assets, _ := s.store.GetAssets(program)
+	findings, _ := s.store.GetFindings(program)
+	tested, _ := s.store.GetTested(program)
+
+	assetResults := make([]interface{}, 0, len(assets))
+	for _, a := range assets {
+		assetResults = append(assetResults, map[string]interface{}{
+			"host":       a.Host,
+			"source":     a.Source,
+			"first_seen": a.FirstSeen.Format(time.RFC3339),
+			"last_seen":  a.LastSeen.Format(time.RFC3339),
+			"in_scope":   a.InScope,
+		})
+	}
+
+	findingResults := make([]interface{}, 0, len(findings))
+	for _, f := range findings {
+		findingResults = append(findingResults, map[string]interface{}{
+			"id":       f.ID,
+			"host":     f.Host,
+			"title":    f.Title,
+			"severity": f.Severity,
+			"status":   f.Status,
+		})
+	}
+
+	testedResults := make([]interface{}, 0, len(tested))
+	for _, te := range tested {
+		testedResults = append(testedResults, map[string]interface{}{
+			"host":     te.Host,
+			"endpoint": te.Endpoint,
+			"check":    te.Check,
+			"result":   te.Result,
+		})
+	}
+
+	return map[string]interface{}{
+		"program":          program,
+		"assets":           assetResults,
+		"findings":         findingResults,
+		"tested_endpoints": testedResults,
+	}, nil
+}
+
+func (s *Server) handleRecordAssets(params map[string]interface{}) (map[string]interface{}, error) {
+	program, _ := params["program"].(string)
+	if program == "" {
+		return nil, fmt.Errorf("parameter 'program' must be a non-empty string")
+	}
+
+	hostsRaw, ok := params["hosts"]
+	if !ok {
+		return nil, fmt.Errorf("missing 'hosts' parameter")
+	}
+	hostsIface, ok := hostsRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("'hosts' must be an array of strings")
+	}
+	if len(hostsIface) == 0 {
+		return nil, fmt.Errorf("'hosts' must contain at least one host")
+	}
+	if len(hostsIface) > 1000 {
+		return nil, fmt.Errorf("'hosts' must contain at most 1000 hosts")
+	}
+
+	source, _ := params["source"].(string)
+
+	assets := make([]db.Asset, 0, len(hostsIface))
+	for i, h := range hostsIface {
+		host, ok := h.(string)
+		if !ok {
+			return nil, fmt.Errorf("'hosts' must be an array of strings (element %d is %T)", i, h)
+		}
+		if host == "" {
+			return nil, fmt.Errorf("'hosts' must not contain empty strings (element %d)", i)
+		}
+		assets = append(assets, db.Asset{Host: host, Source: source})
+	}
+
+	if err := s.store.RecordAssets(program, assets); err != nil {
+		return nil, fmt.Errorf("failed to record assets: %w", err)
+	}
+
+	return map[string]interface{}{
+		"program":  program,
+		"recorded": len(assets),
+	}, nil
+}
+
+func (s *Server) handleRecordFinding(params map[string]interface{}) (map[string]interface{}, error) {
+	program, _ := params["program"].(string)
+	if program == "" {
+		return nil, fmt.Errorf("parameter 'program' must be a non-empty string")
+	}
+
+	host, _ := params["host"].(string)
+	if host == "" {
+		return nil, fmt.Errorf("parameter 'host' must be a non-empty string")
+	}
+
+	title, _ := params["title"].(string)
+	if title == "" {
+		return nil, fmt.Errorf("parameter 'title' must be a non-empty string")
+	}
+
+	severity, _ := params["severity"].(string)
+	switch severity {
+	case "critical", "high", "medium", "low", "info":
+		// valid
+	default:
+		return nil, fmt.Errorf("parameter 'severity' must be one of: critical, high, medium, low, info (got %q)", severity)
+	}
+
+	pocRef, _ := params["poc_ref"].(string)
+
+	finding := db.Finding{
+		Title:    title,
+		Severity: severity,
+		Host:     host,
+		Status:   "open",
+		PoCRef:   pocRef,
+	}
+
+	if err := s.store.RecordFinding(program, &finding); err != nil {
+		return nil, fmt.Errorf("failed to record finding: %w", err)
+	}
+
+	return map[string]interface{}{
+		"finding_id": finding.ID,
+		"status":     "recorded",
+	}, nil
+}
+
+func (s *Server) handleMarkTested(params map[string]interface{}) (map[string]interface{}, error) {
+	program, _ := params["program"].(string)
+	if program == "" {
+		return nil, fmt.Errorf("parameter 'program' must be a non-empty string")
+	}
+
+	host, _ := params["host"].(string)
+	if host == "" {
+		return nil, fmt.Errorf("parameter 'host' must be a non-empty string")
+	}
+
+	endpoint, _ := params["endpoint"].(string)
+	if endpoint == "" {
+		return nil, fmt.Errorf("parameter 'endpoint' must be a non-empty string")
+	}
+
+	check, _ := params["check"].(string)
+	if check == "" {
+		return nil, fmt.Errorf("parameter 'check' must be a non-empty string")
+	}
+
+	result, _ := params["result"].(string)
+	switch result {
+	case "not_vulnerable", "vulnerable", "error", "timeout", "skipped":
+		// valid
+	default:
+		return nil, fmt.Errorf("parameter 'result' must be one of: not_vulnerable, vulnerable, error, timeout, skipped (got %q)", result)
+	}
+
+	te := db.TestedEndpoint{
+		Host:     host,
+		Endpoint: endpoint,
+		Check:    check,
+		Result:   result,
+	}
+
+	if err := s.store.MarkTested(program, te); err != nil {
+		return nil, fmt.Errorf("failed to mark tested: %w", err)
+	}
+
+	return map[string]interface{}{
+		"status": "recorded",
+	}, nil
 }
