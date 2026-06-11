@@ -16,6 +16,8 @@ import (
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/dhiren/pentest-automation/internal/db"
 )
 
 // MCPClient communicates with the ScopePilot MCP server.
@@ -187,6 +189,12 @@ func (c *MCPClient) RunSafeCheck(ctx context.Context, urls []string) (*RunSafeCh
 	return &result, nil
 }
 
+// AssetRecorder is the interface for persisting discovered assets.
+// Implemented by db.Store to avoid direct import dependency.
+type AssetRecorder interface {
+	RecordAssets(program string, hosts []db.Asset) error
+}
+
 // BBOTConfig holds configuration for the BBOT adapter.
 type BBOTConfig struct {
 	BinaryPath   string // Path to bbot binary
@@ -196,6 +204,8 @@ type BBOTConfig struct {
 	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
 	NoProxy      bool // Run without proxy env, post-hoc filter results
 	VPNContainer string // Container name for VPN namespace sharing (--network container:)
+	ProgramID    string // Program ID for engagement memory
+	Store        AssetRecorder // Engagement-memory store (optional)
 }
 
 // NucleiConfig holds configuration for the Nuclei adapter.
@@ -209,6 +219,8 @@ type NucleiConfig struct {
 	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
 	NoProxy      bool // Run without proxy env, post-hoc filter results
 	VPNContainer string // Container name for VPN namespace sharing (--network container:)
+	ProgramID    string // Program ID for engagement memory
+	Store        AssetRecorder // Engagement-memory store (optional)
 }
 
 // BBOTResult holds structured results from a BBOT scan.
@@ -321,6 +333,17 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 		result.SubdomainsFound = allowed
 	} else {
 		result.SubdomainsFound = discovered
+	}
+
+	// Record discovered hosts into engagement memory.
+	if cfg.Store != nil && cfg.ProgramID != "" && len(result.SubdomainsFound) > 0 {
+		assets := make([]db.Asset, len(result.SubdomainsFound))
+		for i, h := range result.SubdomainsFound {
+			assets[i] = db.Asset{Host: h, Source: "bbot", InScope: true}
+		}
+		if err := cfg.Store.RecordAssets(cfg.ProgramID, assets); err != nil {
+			result.Errors = append(result.Errors, fmt.Sprintf("store: %v", err))
+		}
 	}
 
 	return result, nil

@@ -283,7 +283,7 @@ func (s *PGStore) GetAssets(program string) ([]Asset, error) {
 	return nil, fmt.Errorf("PGStore: GetAssets not implemented")
 }
 
-func (s *PGStore) RecordFinding(program string, finding Finding) error {
+func (s *PGStore) RecordFinding(program string, finding *Finding) error {
 	return fmt.Errorf("PGStore: RecordFinding not implemented")
 }
 

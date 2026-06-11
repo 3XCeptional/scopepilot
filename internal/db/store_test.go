@@ -70,7 +70,7 @@ func TestMemoryStore_RecordFinding(t *testing.T) {
 		Host:     "api.example.com",
 		Status:   "open",
 	}
-	if err := s.RecordFinding("crystal", f); err != nil {
+	if err := s.RecordFinding("crystal", &f); err != nil {
 		t.Fatalf("RecordFinding failed: %v", err)
 	}
 
@@ -154,7 +154,7 @@ func TestMemoryStore_SeparatePrograms(t *testing.T) {
 
 	s.RecordAssets("program-a", []Asset{{Host: "a.com", Source: "bbot"}})
 	s.RecordAssets("program-b", []Asset{{Host: "b.com", Source: "bbot"}})
-	s.RecordFinding("program-a", Finding{Title: "XSS in a.com", Severity: "medium"})
+	s.RecordFinding("program-a", &Finding{Title: "XSS in a.com", Severity: "medium"})
 
 	aAssets, _ := s.GetAssets("program-a")
 	bAssets, _ := s.GetAssets("program-b")

@@ -77,8 +77,9 @@ type Store interface {
 	// GetAssets returns all assets recorded for a program.
 	GetAssets(program string) ([]Asset, error)
 
-	// RecordFinding stores a finding for a program.
-	RecordFinding(program string, finding Finding) error
+	// RecordFinding stores a finding for a program. The finding.ID is
+	// populated by the store on success (must pass *Finding for ID to flow back).
+	RecordFinding(program string, finding *Finding) error
 
 	// GetFindings returns all findings for a program.
 	GetFindings(program string) ([]Finding, error)
@@ -189,7 +190,7 @@ func (s *MemoryStore) GetAssets(program string) ([]Asset, error) {
 }
 
 // RecordFinding stores a finding for a program.
-func (s *MemoryStore) RecordFinding(program string, finding Finding) error {
+func (s *MemoryStore) RecordFinding(program string, finding *Finding) error {
 	if finding.ID == "" {
 		finding.ID = newID()
 	}
@@ -201,7 +202,7 @@ func (s *MemoryStore) RecordFinding(program string, finding Finding) error {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	s.findings[program] = append(s.findings[program], finding)
+	s.findings[program] = append(s.findings[program], *finding)
 	return nil
 }
 
