@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/dhiren/pentest-automation/internal/adapter"
+	"github.com/dhiren/pentest-automation/internal/report"
 )
 
 // Vuln is a vulnerability assessment specialist that wraps Nuclei
@@ -94,6 +95,22 @@ func (v *Vuln) Run(ctx context.Context, targets []string, cfg Config) (*Result, 
 
 	if len(nucleiResult.Errors) > 0 {
 		result.Error = fmt.Sprintf("nuclei reported %d errors: %v", len(nucleiResult.Errors), nucleiResult.Errors)
+	}
+
+	// Auto-generate findings report (skip in dry-run mode).
+	if !cfg.DryRun && len(nucleiResult.Findings) > 0 {
+		meta := report.ReportMeta{
+			ProgramID:   cfg.ProgramID,
+			Tool:        "nuclei",
+			TemplateDir: cfg.TemplateDir,
+			Targets:     targets,
+			Duration:    result.Duration,
+		}
+		if p, err := report.WriteReport(nucleiResult.Findings, meta, cfg.OutputDir); err == nil {
+			details, _ := result.Details.(map[string]interface{})
+			details["report_path"] = p
+			result.Details = details
+		}
 	}
 
 	return result, nil

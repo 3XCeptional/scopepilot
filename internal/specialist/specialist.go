@@ -33,6 +33,7 @@ type Config struct {
 	DryRun            bool          // Validate only, no execution
 	Timeout           time.Duration // Max execution time
 	AllowExploitation bool          // Explicit human approval for Gate specialist. Must be true for Gate to execute.
+	OutputDir         string        // Directory for auto-generated findings reports (empty = os.UserCacheDir())
 }
 
 // Result is the common specialist result structure.
