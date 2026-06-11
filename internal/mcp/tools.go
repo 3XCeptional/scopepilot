@@ -483,7 +483,7 @@ func (s *Server) handleDeactivateKillSwitch(params map[string]interface{}) (kill
 	}
 
 	callerToken, _ := params["token"].(string)
-	if callerToken != token {
+	if !secureEqual(callerToken, token) {
 		s.store.LogEntry("mcp", "kill_switch", map[string]interface{}{
 			"action": "deactivate_denied",
 			"reason": "invalid deactivation token",
