@@ -81,6 +81,7 @@ func TestListTools_ReturnsExpectedTools(t *testing.T) {
 		"run_safe_check":         false,
 		"validate_hosts":         false,
 		"health":                 false,
+		"scope_shape":            false,
 		"recall_engagement":      false,
 		"record_assets":          false,
 		"record_finding":         false,
@@ -655,6 +656,90 @@ func TestCallTool_Health(t *testing.T) {
 	}
 }
 
+func TestCallTool_ScopeShape_ExactHostOnly(t *testing.T) {
+	prx := proxy.NewProxy(proxy.Config{
+		ProgramID:            "test-exact",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{
+				{Type: "exact_host", Value: "app.example.com"},
+				{Type: "exact_host", Value: "api.example.com"},
+			},
+		},
+		Limits: config.LimitsConfig{RequestsPerSecondPerHost: 100},
+	})
+	srv := NewServer(prx, db.NewMemoryStore(100), &killswitch.Switch{})
+	result, err := srv.CallToolContext(context.Background(), "scope_shape", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+
+	if hw, _ := r["has_wildcards"].(bool); hw {
+		t.Error("expected has_wildcards=false for exact-host-only scope")
+	}
+	if hc, _ := r["has_cidr"].(bool); hc {
+		t.Error("expected has_cidr=false for exact-host-only scope")
+	}
+	ec, _ := r["exact_host_count"].(float64)
+	if ec < 1 {
+		t.Errorf("expected at least 1 exact_host_count, got %v", ec)
+	}
+	wc, _ := r["wildcard_count"].(float64)
+	if wc != 0 {
+		t.Errorf("expected 0 wildcard_count, got %v", wc)
+	}
+	rec, _ := r["recommendation"].(string)
+	if rec == "" {
+		t.Error("expected non-empty recommendation for exact-host scope")
+	}
+}
+
+func TestCallTool_ScopeShape_Wildcard(t *testing.T) {
+	prx := proxy.NewProxy(proxy.Config{
+		ProgramID:            "test-wild",
+		ActiveTestingEnabled: true,
+		AllowedSchemes:       []string{"https"},
+		AllowedPorts:         []int{443},
+		ScopeCfg: config.ScopeConfig{
+			Include: []config.ScopeRule{
+				{Type: "exact_host", Value: "app.example.com"},
+				{Type: "wildcard_host", Value: "*.example.com"},
+			},
+		},
+		Limits: config.LimitsConfig{RequestsPerSecondPerHost: 100},
+	})
+	srv := NewServer(prx, db.NewMemoryStore(100), &killswitch.Switch{})
+
+	result, err := srv.CallToolContext(context.Background(), "scope_shape", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	r, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+
+	if hw, _ := r["has_wildcards"].(bool); !hw {
+		t.Error("expected has_wildcards=true when wildcard rule exists")
+	}
+	wc, _ := r["wildcard_count"].(float64)
+	if wc < 1 {
+		t.Errorf("expected at least 1 wildcard_count, got %v", wc)
+	}
+	rec, _ := r["recommendation"].(string)
+	if rec == "" {
+		t.Error("expected non-empty recommendation for wildcard scope")
+	}
+}
+
 // ---------------------------------------------------------------------------
 // recall_engagement
 // ---------------------------------------------------------------------------
@@ -1101,8 +1186,8 @@ func TestHTTPServeHTTP_ListTools(t *testing.T) {
 	if resp.ID != 1 {
 		t.Errorf("expected id 1, got %v", resp.ID)
 	}
-	if len(resp.Result) != 15 {
-		t.Errorf("expected 15 tools, got %d", len(resp.Result))
+	if len(resp.Result) != 16 {
+		t.Errorf("expected 16 tools, got %d", len(resp.Result))
 	}
 }
 

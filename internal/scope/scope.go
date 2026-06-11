@@ -37,7 +37,17 @@ func NewEngine(programID string, scopeCfg config.ScopeConfig) *Engine {
 	}
 }
 
-// IsHostInScope checks if a hostname is in scope.
+// IncludeRules returns the include scope rules for the engine.
+func (e *Engine) IncludeRules() []config.ScopeRule {
+	return e.includes
+}
+
+// ExcludeRules returns the exclude scope rules for the engine.
+func (e *Engine) ExcludeRules() []config.ScopeRule {
+	return e.excludes
+}
+
+// IsHostInScope checks whether the given hostname is in scope.
 // Only checks host-level exclusion types (exact_host, wildcard_host).
 // Path-prefix exclusions are checked separately in IsURLInScope.
 func (e *Engine) IsHostInScope(host string) Decision {

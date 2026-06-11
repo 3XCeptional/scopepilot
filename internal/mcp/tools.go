@@ -287,6 +287,26 @@ func (s *Server) ListTools() []ToolDef {
 			},
 		},
 		{
+			Name:        "scope_shape",
+			Description: "Analyzes the program's scope rules and returns a shape description: whether wildcards or CIDRs are present, rule counts, and a hunting strategy recommendation.",
+			InputSchema: map[string]interface{}{
+				"type":                 "object",
+				"properties":           map[string]interface{}{},
+				"required":             []string{},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"has_wildcards":    map[string]interface{}{"type": "boolean"},
+					"has_cidr":         map[string]interface{}{"type": "boolean"},
+					"exact_host_count": map[string]interface{}{"type": "number"},
+					"wildcard_count":   map[string]interface{}{"type": "number"},
+					"recommendation":   map[string]interface{}{"type": "string"},
+				},
+			},
+		},
+		{
 			Name:        "recall_engagement",
 			Description: "Returns prior assets, findings, and tested endpoints for a program. Use this at the start of a hunt session so the agent resumes from where it left off.",
 			InputSchema: map[string]interface{}{
@@ -633,6 +653,9 @@ func (s *Server) callTool(ctx context.Context, name string, params map[string]in
 	case "health":
 		result = s.handleHealth()
 
+	case "scope_shape":
+		result = s.handleScopeShape()
+
 	case "recall_engagement":
 		result, err = s.handleRecallEngagement(params)
 
@@ -905,6 +928,44 @@ func (s *Server) handleHealth() map[string]interface{} {
 		},
 		"program_id":  s.prx.ProgramID,
 		"kill_switch": s.ks.IsActive(),
+	}
+}
+
+func (s *Server) handleScopeShape() map[string]interface{} {
+	rules := s.prx.IncludeRules()
+
+	exactCount := 0
+	wildcardCount := 0
+	hasCIDR := false
+
+	for _, r := range rules {
+		switch r.Type {
+		case "exact_host":
+			exactCount++
+		case "wildcard_host":
+			wildcardCount++
+		case "cidr":
+			hasCIDR = true
+		}
+	}
+
+	rec := ""
+	if exactCount > 0 && wildcardCount == 0 && !hasCIDR {
+		rec = "Exact-host only scope: subdomain enumeration adds no value. " +
+			"Focus on endpoint discovery and nuclei against known hosts."
+	} else if wildcardCount > 0 {
+		rec = "Wildcard scope detected: subdomain enumeration is valuable. " +
+			"Run passive recon (BBOT) first, then nuclei against subdomains."
+	} else if hasCIDR {
+		rec = "CIDR scope detected: port scanning and service discovery recommended."
+	}
+
+	return map[string]interface{}{
+		"has_wildcards":      wildcardCount > 0,
+		"has_cidr":           hasCIDR,
+		"exact_host_count":   float64(exactCount),
+		"wildcard_count":     float64(wildcardCount),
+		"recommendation":     rec,
 	}
 }
 
