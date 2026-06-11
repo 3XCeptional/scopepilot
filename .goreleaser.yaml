@@ -1,0 +1,69 @@
+# yaml-language-server: $schema=https://goreleaser.com/static/schema.json
+version: 2
+project_name: scopepilot
+
+before:
+  hooks:
+    - go mod tidy
+
+builds:
+  - id: pentest
+    main: ./cmd/pentest
+    binary: pentest
+    ldflags:
+      - -s -w -X main.version={{.Version}} -X main.commit={{.Commit}} -X main.date={{.Date}}
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    tags:
+      - netgo
+
+archives:
+  - id: binary
+    formats: [tar.gz]
+    name_template: >-
+      {{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}
+    files:
+      - README.md
+      - LICENSE
+
+checksum:
+  name_template: "checksums.txt"
+
+snapshot:
+  name_template: "{{ .Version }}-next"
+
+changelog:
+  sort: asc
+  filters:
+    exclude:
+      - "^docs:"
+      - "^test:"
+      - "^ci:"
+
+release:
+  github:
+    owner: dhiren
+    name: pentest-automation
+  prerelease: auto
+
+brews:
+  - name: scopepilot
+    repository:
+      owner: dhiren
+      name: homebrew-tap
+    commit_author:
+      name: goreleaserbot
+      email: bot@goreleaser.com
+    homepage: "https://github.com/dhiren/pentest-automation"
+    description: "Scope-enforcing HTTPS CONNECT proxy for bug bounty hunting. One proxy, every tool, every byte logged."
+    license: "MIT"
+    test: |
+      system "#{bin}/pentest --version"
+    install: |
+      bin.install "pentest"

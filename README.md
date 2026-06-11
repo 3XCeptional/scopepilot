@@ -1,30 +1,44 @@
 # ScopePilot
 
-A model-agnostic, rootless-Podman scope enforcement gateway for authorized security testing. Works with Hermes, Claude, Codex, OpenClaw, and any MCP-compatible agent.
+[![Go](https://github.com/dhiren/pentest-automation/actions/workflows/test.yml/badge.svg)](https://github.com/dhiren/pentest-automation/actions)
+[![Release](https://github.com/dhiren/pentest-automation/actions/workflows/release.yml/badge.svg)](https://github.com/dhiren/pentest-automation/releases)
+[![Go Report Card](https://goreportcard.com/badge/github.com/dhiren/pentest-automation)](https://goreportcard.com/report/github.com/dhiren/pentest-automation)
+[![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-**Current**: v0.1.0 — Safety gate MVP. All core packages built and tested.
+> Put ScopePilot in front of your recon tools and you **physically cannot** send
+> a request to an out-of-scope host. One proxy. Every tool. Every byte logged.
 
-## What It Does
+A scope-enforcing HTTPS CONNECT proxy for bug bounty hunting. Works with
+curl, ffuf, nuclei, httpx, your browser — any tool that speaks HTTP proxy.
 
-ScopePilot sits between an operator's recon tools (BBOT, Nuclei, custom scripts) and their targets. Every request passes through a safety chain:
-
-```
-target list → scope check → DNS revalidation → IP blocklist → rate limit
-→ kill switch check → audit log → [forward to target only if ALL pass]
-```
-
-## Quick Start
+## Install
 
 ```bash
-make doctor        # Check Go, Podman environment
-export SCOPEPILOT_MCP_API_KEY="$(openssl rand -hex 32)"
-export SCOPEPILOT_POSTGRES_PASSWORD="$(openssl rand -hex 32)"
-make build         # Build containers
-make test          # Run all Go tests (9 packages, 200+ tests)
-make up            # Start ScopePilot + PostgreSQL + fixture
-make test-unit     # Unit tests only
-make logs          # Tail logs
-make clean         # Stop and remove containers
+# macOS — Homebrew
+brew install dhiren/tap/scopepilot
+
+# Any platform — Go install
+go install github.com/dhiren/pentest-automation/cmd/pentest@latest
+
+# Or download a static binary from GitHub Releases
+curl -sSL https://github.com/dhiren/pentest-automation/releases/latest/download/scopepilot_linux_amd64.tar.gz | tar xz
+```
+
+**No Docker or Podman required** to run the gate. Single static binary.
+
+```bash
+# Generate config + start
+scopepilot init                          # interactive wizard
+export SCOPEPILOT_MCP_API_KEY=$openssl rand -hex 32)"
+scopepilot server --config scope.yaml    # proxy :8443 | MCP :9090
+
+# Every tool is now scope-gated — physically cannot hit out-of-scope
+export https_proxy=http://127.0.0.1:8443
+curl -sk https://in-scope.com            # ✅ CONNECT tunnel — allowed
+curl -sk https://out-of-scope.com        # ❌ 403 — blocked by proxy
+
+# Watch live decisions as they happen
+scopepilot watch
 ```
 
 ## Architecture
@@ -89,11 +103,13 @@ requests require `Authorization: Bearer $SCOPEPILOT_MCP_API_KEY`.
 10. **Redirect revalidation** — every redirect target re-checked through entire chain
 11. **Audit log** — every allow/deny recorded
 12. **Response redaction** — Authorization, Cookie, Set-Cookie headers stripped
+13. **HTTPS CONNECT tunnel** — full safety chain applies to CONNECT too.
+    Path-prefix exclusions cannot apply to CONNECT (TLS hides the path).
+    Documented limitation; host, port, IP, rate-limit checks still apply.
 
-The proxy deliberately rejects HTTPS `CONNECT` tunneling because encrypted
-tunnels would bypass path exclusions and per-request rate limits. Active HTTPS
-scanner execution remains blocked until a TLS-aware worker/proxy design is
-implemented.
+The proxy accepts HTTPS CONNECT tunneling. Set your `https_proxy` to the
+proxy address and every tool — curl, ffuf, nuclei, httpx, browser — is
+scope-gated through the full safety chain.
 
 ## Containers
 
