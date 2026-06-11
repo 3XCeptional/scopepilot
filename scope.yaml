@@ -1,0 +1,33 @@
+global:
+    kill_switch:
+        enabled: false
+    vpn:
+        enabled: false
+    defaults:
+        requests_per_second_per_host: 5
+        max_concurrency: 3
+        max_response_bytes: 10485760
+        allowed_schemes:
+            - https
+        allowed_ports:
+            - 443
+        dry_run: false
+    audit:
+        enabled: true
+        retain_days: 30
+        redact_secrets: true
+    log_level: info
+    log_format: text
+programs:
+    - id: ""
+      name: ""
+      active_testing_enabled: true
+      limits:
+        requests_per_second_per_host: 5
+        max_concurrency: 3
+      scope:
+        include:
+            - type: exact_host
+              value: ""
+        exclude: []
+      status: active

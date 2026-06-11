@@ -460,10 +460,10 @@ func (s *Server) handleActivateKillSwitch(params map[string]interface{}) killswi
 	s.ks.Activate(by)
 
 	s.store.LogEntry("mcp", "kill_switch", map[string]interface{}{
-			"action": "activate",
-			"reason": reason,
-			"by":     by,
-		})
+		"action": "activate",
+		"reason": reason,
+		"by":     by,
+	})
 
 	return s.ks.Status()
 }
@@ -541,7 +541,6 @@ func (s *Server) handleRunSafeCheck(params map[string]interface{}) (map[string]i
 		"results": results,
 	}, nil
 }
-
 
 func (s *Server) handleRunSpecialist(ctx context.Context, name string, params map[string]interface{}) (interface{}, error) {
 	if s.ks.IsActive() {

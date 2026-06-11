@@ -17,7 +17,7 @@ import (
 // Wraps the in-memory Logger for hot reads but persists every entry to SQLite.
 // On restart, the last N entries are replayed into the in-memory buffer.
 type PersistentLogger struct {
-	*Logger              // embed in-memory logger for fast reads
+	*Logger  // embed in-memory logger for fast reads
 	db       *sql.DB
 	ringSize int
 	path     string
