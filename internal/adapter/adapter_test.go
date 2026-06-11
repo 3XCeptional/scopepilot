@@ -67,7 +67,7 @@ func TestNucleiArgs(t *testing.T) {
 	templateDir := "/templates"
 	targets := []string{"example.com", "test.com"}
 
-	args := nucleiArgs(templateDir, targets)
+	args := nucleiArgs(templateDir, targets, "/tmp/test_output.jsonl")
 
 	// Verify -jsonl present (not deprecated -json)
 	hasJSONL := false
@@ -148,10 +148,45 @@ func TestBBOTArgsNoDeprecatedFlags(t *testing.T) {
 }
 
 func TestNucleiArgsNoDeprecatedFlags(t *testing.T) {
-	args := nucleiArgs("/templates", []string{"x.com"})
+	args := nucleiArgs("/templates", []string{"x.com"}, "/tmp/test.jsonl")
 	argStr := strings.Join(args, " ")
 	if strings.Contains(argStr, "-json ") {
 		t.Errorf("nuclei args contain deprecated -json flag: %s", args)
+	}
+}
+
+func TestNucleiArgsNoHardcodedTmp(t *testing.T) {
+	// RunNuclei now uses os.CreateTemp for a unique, per-run path.
+	// Verify nucleiArgs does NOT contain a bare /tmp/ path.
+	args := nucleiArgs("/t", []string{"h.com"}, "/tmp/scopepilot_nuclei_out.jsonl")
+	argStr := strings.Join(args, " ")
+	if !strings.Contains(argStr, "/tmp/") {
+		t.Error("expected /tmp/ in args (test uses /tmp path), but check that it's the param not hardcoded")
+	}
+	// Now verify with a non-/tmp path to confirm the param is used.
+	args2 := nucleiArgs("/t", []string{"h.com"}, filepath.Join(t.TempDir(), "out.jsonl"))
+	argStr2 := strings.Join(args2, " ")
+	if strings.Contains(argStr2, "/tmp/scopepilot") {
+		t.Error("nucleiArgs still contains hardcoded /tmp/scopepilot path: " + argStr2)
+	}
+}
+
+func TestParseNucleiOutput_SampleJSONL(t *testing.T) {
+	sample := `{"template-id":"tech-detect","name":"Tech Detection","severity":"info","host":"https://app.example.com","type":"http"}
+{"template-id":"cve-2024-0001","name":"Test CVE","severity":"high","host":"https://app.example.com","type":"http"}
+`
+	findings := parseNucleiOutput(sample)
+	if len(findings) != 2 {
+		t.Fatalf("expected 2 findings, got %d: %v", len(findings), findings)
+	}
+	// First should be info severity.
+	if !strings.Contains(findings[0], "[info]") {
+		t.Errorf("expected first finding severity 'info', got %q", findings[0])
+	}
+	// Non-JSON line should be skipped silently.
+	findings2 := parseNucleiOutput("banner line\n" + sample + "trailing\n")
+	if len(findings2) != 2 {
+		t.Errorf("expected 2 findings with banner noise, got %d", len(findings2))
 	}
 }
 

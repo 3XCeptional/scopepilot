@@ -403,7 +403,17 @@ func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*Nuclei
 	}
 
 	// Step 2: Build Nuclei command with safe args.
-	args := nucleiArgs(cfg.TemplateDir, inScope)
+	// Create a temp file for nuclei JSONL output so parseNucleiOutput
+	// reads clean JSONL instead of stdout banner noise.
+	tmpOut, err := os.CreateTemp("", "scopepilot_nuclei_*.jsonl")
+	if err != nil {
+		return nil, fmt.Errorf("nuclei: create temp output: %w", err)
+	}
+	tmpPath := tmpOut.Name()
+	tmpOut.Close()
+	defer os.Remove(tmpPath)
+
+	args := nucleiArgs(cfg.TemplateDir, inScope, tmpPath)
 
 	severities := cfg.Severities
 	if len(severities) == 0 {
@@ -430,7 +440,14 @@ func RunNuclei(ctx context.Context, cfg NucleiConfig, targets []string) (*Nuclei
 
 	result.TargetsScanned = len(inScope)
 	result.RawOutput = string(output)
-	result.Findings = parseNucleiOutput(string(output))
+
+	// Read findings from the temp output file (nuclei writes JSONL there,
+	// stdout only contains banner/log noise).
+	if data, readErr := os.ReadFile(tmpPath); readErr == nil {
+		result.Findings = parseNucleiOutput(string(data))
+	} else {
+		result.Errors = append(result.Errors, fmt.Sprintf("nuclei: read output: %v", readErr))
+	}
 
 	return result, nil
 }
@@ -545,8 +562,9 @@ func bbotArgs(targets []string, proxyURL string, noProxy bool) []string {
 }
 
 // nucleiArgs returns the CLI args for a Nuclei scan run, selecting
-// flags appropriate for the detected Nuclei version.
-func nucleiArgs(templateDir string, targets []string) []string {
+// flags appropriate for the detected Nuclei version. outputPath is
+// the file path where nuclei should write JSONL results.
+func nucleiArgs(templateDir string, targets []string, outputPath string) []string {
 	version := detectNucleiVersion("nuclei")
 	jsonFlag := "-jsonl"
 	if version < 3 && version > 0 {
@@ -555,7 +573,7 @@ func nucleiArgs(templateDir string, targets []string) []string {
 	args := []string{
 		"-t", templateDir,
 		jsonFlag,
-		"-o", "-",
+		"-o", outputPath,
 		"--no-httpx",
 		"--bulk-size", "5",
 		"--concurrency", "2",
