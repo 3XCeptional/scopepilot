@@ -194,6 +194,7 @@ type BBOTConfig struct {
 	DryRun       bool // If true, only check scope, don't execute BBOT
 	Timeout      time.Duration
 	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	NoProxy      bool // Run without proxy env, post-hoc filter results
 	VPNContainer string // Container name for VPN namespace sharing (--network container:)
 }
 
@@ -206,6 +207,7 @@ type NucleiConfig struct {
 	TemplateDir  string // Path to nuclei templates
 	Severities   []string
 	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	NoProxy      bool // Run without proxy env, post-hoc filter results
 	VPNContainer string // Container name for VPN namespace sharing (--network container:)
 }
 
@@ -216,6 +218,7 @@ type BBOTResult struct {
 	SubdomainsFound []string `json:"subdomains_found,omitempty"`
 	RawOutput       string   `json:"raw_output,omitempty"`
 	DryRun          bool     `json:"dry_run"`
+	NoProxy         bool     `json:"no_proxy,omitempty"` // ran without proxy env
 	Errors          []string `json:"errors,omitempty"`
 }
 
@@ -226,6 +229,7 @@ type NucleiResult struct {
 	Findings       []string `json:"findings,omitempty"`
 	RawOutput      string   `json:"raw_output,omitempty"`
 	DryRun         bool     `json:"dry_run"`
+	NoProxy        bool     `json:"no_proxy,omitempty"` // ran without proxy env
 	Errors         []string `json:"errors,omitempty"`
 }
 
@@ -271,21 +275,28 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 	if len(inScope) == 0 {
 		return result, nil
 	}
-	if cfg.ProxyURL == "" {
-		return nil, fmt.Errorf("bbot: proxy URL is required for execution")
-	}
-	if err := validateProxyURL(cfg.ProxyURL); err != nil {
-		return nil, fmt.Errorf("bbot: %w", err)
+	if cfg.NoProxy {
+		// Recon-no-proxy mode: run without proxy env, post-hoc filter results.
+		result.NoProxy = true
+	} else {
+		if cfg.ProxyURL == "" {
+			return nil, fmt.Errorf("bbot: proxy URL is required for execution")
+		}
+		if err := validateProxyURL(cfg.ProxyURL); err != nil {
+			return nil, fmt.Errorf("bbot: %w", err)
+		}
 	}
 	if cfg.VPNContainer != "" {
 		return nil, fmt.Errorf("bbot: VPN namespace %q cannot be enforced for a host process; use a containerized worker", cfg.VPNContainer)
 	}
 
 	// Step 2: Build BBOT command with safe args.
-	args := bbotArgs(inScope, cfg.ProxyURL)
-
-	cmd := exec.CommandContext(ctx, cfg.BinaryPath, args...)
-	cmd.Env = proxyEnvironment(cfg.ProxyURL)
+	cmd := exec.CommandContext(ctx, cfg.BinaryPath, bbotArgs(inScope, cfg.ProxyURL, cfg.NoProxy)...)
+	if cfg.NoProxy {
+		cmd.Env = os.Environ() // direct internet, no proxy
+	} else {
+		cmd.Env = proxyEnvironment(cfg.ProxyURL)
+	}
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
@@ -295,7 +306,22 @@ func RunBBOT(ctx context.Context, cfg BBOTConfig, targets []string) (*BBOTResult
 
 	result.TargetsScanned = len(inScope)
 	result.RawOutput = string(output)
-	result.SubdomainsFound = parseBBOTOutput(string(output))
+
+	// Parse raw output to discover hosts.
+	discovered := parseBBOTOutput(string(output))
+
+	// Post-hoc scope filter for no-proxy mode.
+	if cfg.NoProxy {
+		var allowed []string
+		for _, h := range discovered {
+			if ok, _ := cfg.MCPClient.FilterInScope(ctx, []string{h}); len(ok) > 0 {
+				allowed = append(allowed, h)
+			}
+		}
+		result.SubdomainsFound = allowed
+	} else {
+		result.SubdomainsFound = discovered
+	}
 
 	return result, nil
 }
@@ -475,15 +501,18 @@ func proxyEnvironment(proxyURL string) []string {
 
 // bbotArgs returns the CLI args for a BBOT discovery run.
 // Uses the most recent BBOT v2.x flags (passive-only via -rf passive).
-func bbotArgs(targets []string, proxyURL string) []string {
-	return []string{
+func bbotArgs(targets []string, proxyURL string, noProxy bool) []string {
+	args := []string{
 		"-t", strings.Join(targets, ","),
 		"-rf", "passive",
 		"-y",
 		"-o", "-",
 		"-om", "json",
-		"--proxy", proxyURL,
 	}
+	if !noProxy && proxyURL != "" {
+		args = append(args, "--proxy", proxyURL)
+	}
+	return args
 }
 
 // nucleiArgs returns the CLI args for a Nuclei scan run.

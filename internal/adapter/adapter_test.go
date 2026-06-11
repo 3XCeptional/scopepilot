@@ -9,7 +9,7 @@ func TestBBOTArgs(t *testing.T) {
 	targets := []string{"example.com", "test.com"}
 	proxyURL := "http://127.0.0.1:8443"
 
-	args := bbotArgs(targets, proxyURL)
+	args := bbotArgs(targets, proxyURL, false)
 
 	// Verify targets
 	foundTargets := false
@@ -131,7 +131,7 @@ func TestParseMajorVersion(t *testing.T) {
 }
 
 func TestBBOTArgsNoDeprecatedFlags(t *testing.T) {
-	args := bbotArgs([]string{"x.com"}, "http://proxy:8080")
+	args := bbotArgs([]string{"x.com"}, "http://proxy:8080", false)
 	argStr := strings.Join(args, " ")
 	deprecated := []string{"--passive-only", "--no-dns", "--no-www"}
 	for _, d := range deprecated {
