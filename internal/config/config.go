@@ -13,9 +13,18 @@ import (
 )
 
 // Config is the root platform configuration.
+// Config is the top-level configuration loaded from a YAML file.
 type Config struct {
 	Programs []ProgramConfig `yaml:"programs" json:"programs"`
 	Global   GlobalConfig    `yaml:"global" json:"global"`
+}
+
+// LLMConfig configures an LLM provider for agent-driven workers.
+type LLMConfig struct {
+	Provider   string `yaml:"provider" json:"provider"`     // e.g. "openai/gpt-4o"
+	Model      string `yaml:"model" json:"model"`           // e.g. "gpt-4o"
+	APIKeyEnv  string `yaml:"api_key_env" json:"api_key_env"` // env var name, e.g. "OPENAI_API_KEY"
+	BaseURL    string `yaml:"base_url" json:"base_url"`     // optional, e.g. "https://api.openai.com/v1"
 }
 
 // GlobalConfig holds platform-wide settings.
@@ -26,6 +35,7 @@ type GlobalConfig struct {
 	Database   DatabaseConfig   `yaml:"database" json:"database"`
 	VPN        GlobalVPNConfig  `yaml:"vpn" json:"vpn"`
 	Sandbox    SandboxConfig    `yaml:"sandbox" json:"sandbox"`
+	LLM        LLMConfig        `yaml:"llm" json:"llm"`
 	LogLevel   string           `yaml:"log_level" json:"log_level"`
 	LogFormat  string           `yaml:"log_format" json:"log_format"` // json or text
 }
