@@ -201,10 +201,10 @@ type BBOTConfig struct {
 	MCPClient    *MCPClient
 	DryRun       bool // If true, only check scope, don't execute BBOT
 	Timeout      time.Duration
-	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
-	NoProxy      bool // Run without proxy env, post-hoc filter results
-	VPNContainer string // Container name for VPN namespace sharing (--network container:)
-	ProgramID    string // Program ID for engagement memory
+	ProxyURL     string        // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	NoProxy      bool          // Run without proxy env, post-hoc filter results
+	VPNContainer string        // Container name for VPN namespace sharing (--network container:)
+	ProgramID    string        // Program ID for engagement memory
 	Store        AssetRecorder // Engagement-memory store (optional)
 }
 
@@ -216,10 +216,10 @@ type NucleiConfig struct {
 	Timeout      time.Duration
 	TemplateDir  string // Path to nuclei templates
 	Severities   []string
-	ProxyURL     string // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
-	NoProxy      bool // Run without proxy env, post-hoc filter results
-	VPNContainer string // Container name for VPN namespace sharing (--network container:)
-	ProgramID    string // Program ID for engagement memory
+	ProxyURL     string        // HTTP proxy URL (e.g. http://127.0.0.1:8443); empty = no proxy
+	NoProxy      bool          // Run without proxy env, post-hoc filter results
+	VPNContainer string        // Container name for VPN namespace sharing (--network container:)
+	ProgramID    string        // Program ID for engagement memory
 	Store        AssetRecorder // Engagement-memory store (optional)
 }
 

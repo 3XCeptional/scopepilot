@@ -21,7 +21,7 @@ import (
 // Asset represents a discovered host or subdomain.
 type Asset struct {
 	Host      string    `json:"host"`
-	Source    string    `json:"source"`    // e.g. "bbot", "manual", "nuclei"
+	Source    string    `json:"source"` // e.g. "bbot", "manual", "nuclei"
 	FirstSeen time.Time `json:"first_seen"`
 	LastSeen  time.Time `json:"last_seen"`
 	InScope   bool      `json:"in_scope"`
@@ -30,13 +30,13 @@ type Asset struct {
 
 // Finding represents a security finding.
 type Finding struct {
-	ID        string    `json:"id"`
-	Title     string    `json:"title"`
-	Severity  string    `json:"severity"` // critical, high, medium, low, info
-	Host      string    `json:"host"`
-	Status    string    `json:"status"` // open, confirmed, false_positive, fixed
-	PoCRef    string    `json:"poc_ref,omitempty"`
-	Created   time.Time `json:"created"`
+	ID       string    `json:"id"`
+	Title    string    `json:"title"`
+	Severity string    `json:"severity"` // critical, high, medium, low, info
+	Host     string    `json:"host"`
+	Status   string    `json:"status"` // open, confirmed, false_positive, fixed
+	PoCRef   string    `json:"poc_ref,omitempty"`
+	Created  time.Time `json:"created"`
 }
 
 // TestedEndpoint records that a specific check was performed.
@@ -105,8 +105,8 @@ type MemoryStore struct {
 	mu     sync.RWMutex
 
 	// Engagement memory
-	assets   map[string][]Asset      // program -> assets
-	findings map[string][]Finding    // program -> findings
+	assets   map[string][]Asset          // program -> assets
+	findings map[string][]Finding        // program -> findings
 	tested   map[string][]TestedEndpoint // program -> tested
 }
 

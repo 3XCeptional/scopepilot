@@ -89,9 +89,9 @@ type GlobalVPNConfig struct {
 
 // ToolsConfig defines paths to external scanning tools.
 type ToolsConfig struct {
-	BBOTPath     string `yaml:"bbot_path" json:"bbot_path"`
-	NucleiPath   string `yaml:"nuclei_path" json:"nuclei_path"`
-	TemplateDir  string `yaml:"template_dir" json:"template_dir"`
+	BBOTPath    string `yaml:"bbot_path" json:"bbot_path"`
+	NucleiPath  string `yaml:"nuclei_path" json:"nuclei_path"`
+	TemplateDir string `yaml:"template_dir" json:"template_dir"`
 }
 
 // SandboxConfig controls the malware sandbox.
@@ -143,7 +143,7 @@ type ScopeConfig struct {
 type ScopeRule struct {
 	Type        string `yaml:"type" json:"type"` // exact_host, wildcard_host, path_prefix, cidr
 	Value       string `yaml:"value" json:"value"`
-	Host        string `yaml:"host" json:"host"` // optional, for path_prefix rules
+	Host        string `yaml:"host" json:"host"`                                     // optional, for path_prefix rules
 	IncludeApex bool   `yaml:"include_apex,omitempty" json:"include_apex,omitempty"` // wildcard_host only: when true, *.example.com also matches example.com
 }
 
