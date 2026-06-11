@@ -8,11 +8,24 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/google/uuid"
 )
+
+// newLockFile creates a portable advisory lock using a separate lock file.
+func newLockFile(path string) (func(), error) {
+	lockPath := path + ".lock"
+	f, err := os.OpenFile(lockPath, os.O_CREATE|os.O_EXCL|os.O_RDWR, 0666)
+	if err != nil {
+		return nil, fmt.Errorf("cannot acquire lock: %w", err)
+	}
+	f.Close()
+	unlock := func() {
+		os.Remove(lockPath)
+	}
+	return unlock, nil
+}
 
 // Task represents a step in the distributed hunt system.
 type Task struct {
@@ -421,27 +434,6 @@ func (q *Queue) saveTasks(tasks []Task) error {
 }
 
 // lock acquires an exclusive advisory lock on q.path + ".lock".
-// It returns a function that, when called, releases the lock and closes the lock file.
 func (q *Queue) lock() (func(), error) {
-	dir := filepath.Dir(q.path)
-	if err := os.MkdirAll(dir, 0755); err != nil {
-		return nil, fmt.Errorf("failed to create queue directory: %w", err)
-	}
-
-	lockPath := q.path + ".lock"
-	file, err := os.OpenFile(lockPath, os.O_CREATE|os.O_RDWR, 0666)
-	if err != nil {
-		return nil, fmt.Errorf("failed to open lock file: %w", err)
-	}
-
-	if err := syscall.Flock(int(file.Fd()), syscall.LOCK_EX); err != nil {
-		file.Close()
-		return nil, fmt.Errorf("failed to acquire file lock: %w", err)
-	}
-
-	unlock := func() {
-		syscall.Flock(int(file.Fd()), syscall.LOCK_UN)
-		file.Close()
-	}
-	return unlock, nil
+	return newLockFile(q.path)
 }
