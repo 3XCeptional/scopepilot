@@ -78,6 +78,9 @@ The Pentest Automation Platform is a local-first reconnaissance system for autho
 **Mitigation**: Scope proxy validates every redirect target against program scope. Fails closed.
 **Test**: Fixture returns redirects to out-of-scope hosts; verify proxy blocks them.
 
+**Note**: CONNECT tunnels provide a narrower enforcement surface than HTTP
+forwarding — see docs/threat-model/README.md A4.
+
 ### T4: VPN tunnel leak
 
 **Risk**: Traffic bypasses VPN when tunnel is down.
@@ -123,3 +126,7 @@ The Pentest Automation Platform is a local-first reconnaissance system for autho
 2. The malware sandbox in rootless Podman is NOT a substitute for a dedicated malware analysis VM.
 3. Network timing side-channels may exist between containers on the same Podman host.
 4. The Go scope proxy adds latency to every request (acceptable trade-off for safety).
+5. HTTPS CONNECT tunnels are a **CONNECT allowlist**, not a per-request filter.
+   Once a tunnel to an in-scope host is established, path-prefix exclusions
+   and per-host rate limiting do not apply to traffic inside it.
+   See docs/threat-model/README.md A4 for details.
