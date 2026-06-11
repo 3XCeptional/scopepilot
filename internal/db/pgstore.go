@@ -259,6 +259,7 @@ func NewConfiguredStore(cfg StoreConfig) (Store, error) {
 }
 
 // scanEntries scans audit entries from a pgx row iterator.
+// Returns nil if no rows or if an error occurred during iteration.
 func scanEntries(rows pgx.Rows) []*audit.Entry {
 	var result []*audit.Entry
 	for rows.Next() {
@@ -271,6 +272,11 @@ func scanEntries(rows pgx.Rows) []*audit.Entry {
 			json.Unmarshal(dataJSON, &e.Data)
 		}
 		result = append(result, &e)
+	}
+	// If the iteration stopped due to a database error, discard partial
+	// results so callers don't act on silently truncated data.
+	if rows.Err() != nil {
+		return nil
 	}
 	return result
 }
