@@ -17,6 +17,7 @@ import (
 	"net/http"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
 	"github.com/dhiren/pentest-automation/internal/db"
@@ -102,15 +103,17 @@ type Server struct {
 	specialistConfig  specialist.Config
 	specialists       map[string]specialist.Specialist
 	gateApprovalToken string
+	startedAt         time.Time
 }
 
 // NewServer creates a new MCP server wrapping the given proxy, data store,
 // and kill switch.
 func NewServer(prx *proxy.Proxy, s db.Store, ks *killswitch.Switch) *Server {
 	return &Server{
-		prx:   prx,
-		store: s,
-		ks:    ks,
+		prx:       prx,
+		store:     s,
+		ks:        ks,
+		startedAt: time.Now(),
 	}
 }
 

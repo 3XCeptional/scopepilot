@@ -79,6 +79,8 @@ func TestListTools_ReturnsExpectedTools(t *testing.T) {
 		"deactivate_kill_switch": false,
 		"is_kill_switch_active":  false,
 		"run_safe_check":         false,
+		"validate_hosts":         false,
+		"health":                 false,
 	}
 
 	for _, tool := range tools {
@@ -498,7 +500,159 @@ func TestCallTool_UnknownFields_Rejected(t *testing.T) {
 }
 
 // ---------------------------------------------------------------------------
-// Audit logging of MCP invocations
+// validate_hosts
+// ---------------------------------------------------------------------------
+
+func TestCallTool_ValidateHosts_AllInScope(t *testing.T) {
+	srv := testServer()
+	result, err := srv.CallToolContext(context.Background(), "validate_hosts", map[string]interface{}{
+		"hosts": []interface{}{"example.com", "sub.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	results, ok := result.([]hostScopeResult)
+	if !ok {
+		t.Fatalf("expected []hostScopeResult, got %T", result)
+	}
+	if len(results) != 2 {
+		t.Fatalf("expected 2 results, got %d", len(results))
+	}
+	for _, r := range results {
+		if !r.InScope {
+			t.Errorf("expected host %q in scope, got reason: %s", r.Host, r.Reason)
+		}
+		if r.Host == "" {
+			t.Errorf("expected non-empty host in result")
+		}
+		if r.Reason == "" {
+			t.Errorf("expected non-empty reason")
+		}
+	}
+}
+
+func TestCallTool_ValidateHosts_MixedScope(t *testing.T) {
+	srv := testServer()
+	result, err := srv.CallToolContext(context.Background(), "validate_hosts", map[string]interface{}{
+		"hosts": []interface{}{"example.com", "evil.com", "excluded.example.com"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	results, ok := result.([]hostScopeResult)
+	if !ok {
+		t.Fatalf("expected []hostScopeResult, got %T", result)
+	}
+	if len(results) != 3 {
+		t.Fatalf("expected 3 results, got %d", len(results))
+	}
+
+	// example.com — in scope
+	if !results[0].InScope || results[0].Host != "example.com" {
+		t.Errorf("expected example.com in scope, got in_scope=%v reason=%s", results[0].InScope, results[0].Reason)
+	}
+	// evil.com — out of scope
+	if results[1].InScope || results[1].Host != "evil.com" {
+		t.Errorf("expected evil.com out of scope, got in_scope=%v reason=%s", results[1].InScope, results[1].Reason)
+	}
+	// excluded.example.com — explicitly excluded
+	if results[2].InScope || results[2].Host != "excluded.example.com" {
+		t.Errorf("expected excluded.example.com out of scope, got in_scope=%v reason=%s", results[2].InScope, results[2].Reason)
+	}
+}
+
+func TestCallTool_ValidateHosts_EmptyHosts(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "validate_hosts", map[string]interface{}{
+		"hosts": []interface{}{},
+	})
+	if err == nil {
+		t.Fatal("expected error for empty hosts, got nil")
+	}
+}
+
+func TestCallTool_ValidateHosts_MissingParam(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "validate_hosts", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("expected error for missing hosts, got nil")
+	}
+}
+
+func TestCallTool_ValidateHosts_InvalidElement(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "validate_hosts", map[string]interface{}{
+		"hosts": []interface{}{"example.com", 42},
+	})
+	if err == nil || !strings.Contains(err.Error(), "strings") {
+		t.Fatalf("expected invalid element error, got %v", err)
+	}
+}
+
+func TestCallTool_ValidateHosts_EmptyString(t *testing.T) {
+	srv := testServer()
+	_, err := srv.CallToolContext(context.Background(), "validate_hosts", map[string]interface{}{
+		"hosts": []interface{}{"example.com", ""},
+	})
+	if err == nil || !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("expected empty string error, got %v", err)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// health
+// ---------------------------------------------------------------------------
+
+func TestCallTool_Health(t *testing.T) {
+	srv := testServer()
+	result, err := srv.CallToolContext(context.Background(), "health", map[string]interface{}{})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+
+	h, ok := result.(map[string]interface{})
+	if !ok {
+		t.Fatalf("expected map[string]interface{}, got %T", result)
+	}
+
+	// Check top-level fields.
+	if pid, ok := h["program_id"]; !ok || pid == "" {
+		t.Errorf("expected non-empty program_id, got %v", pid)
+	}
+	if ks, ok := h["kill_switch"]; !ok {
+		t.Errorf("expected kill_switch field, got %v", ks)
+	}
+
+	// Check proxy sub-object.
+	proxyField, ok := h["proxy"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'proxy' map")
+	}
+	if status, ok := proxyField["status"]; !ok || status != "ok" {
+		t.Errorf("expected proxy.status 'ok', got %v", status)
+	}
+	if _, ok := proxyField["listen"]; !ok {
+		t.Errorf("expected proxy.listen field")
+	}
+	// proxy.listen may be empty in embedded/test proxies — that's valid.
+	if uptime, ok := proxyField["uptime"]; !ok || uptime == "" {
+		t.Errorf("expected non-empty proxy.uptime, got %v", uptime)
+	}
+
+	// Check mcp sub-object.
+	mcpField, ok := h["mcp"].(map[string]interface{})
+	if !ok {
+		t.Fatal("expected 'mcp' map")
+	}
+	if status, ok := mcpField["status"]; !ok || status != "ok" {
+		t.Errorf("expected mcp.status 'ok', got %v", status)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HTTP handler (JSON-RPC 2.0)
 // ---------------------------------------------------------------------------
 
 func TestCallTool_AuditLogging(t *testing.T) {
@@ -678,8 +832,8 @@ func TestHTTPServeHTTP_ListTools(t *testing.T) {
 	if resp.ID != 1 {
 		t.Errorf("expected id 1, got %v", resp.ID)
 	}
-	if len(resp.Result) != 9 {
-		t.Errorf("expected 9 tools, got %d", len(resp.Result))
+	if len(resp.Result) != 11 {
+		t.Errorf("expected 11 tools, got %d", len(resp.Result))
 	}
 }
 

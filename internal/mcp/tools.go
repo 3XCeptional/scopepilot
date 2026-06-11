@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/url"
 	"strings"
+	"time"
 
 	"github.com/dhiren/pentest-automation/internal/audit"
 	"github.com/dhiren/pentest-automation/internal/killswitch"
@@ -224,6 +225,66 @@ func (s *Server) ListTools() []ToolDef {
 				},
 			},
 		},
+		{
+			Name:        "validate_hosts",
+			Description: "Pure rule-based scope check for hostnames. Checks each host against the program's scope rules (exact_host, wildcard_host, CIDR) with NO DNS resolution or IP blocklist checks. Useful for post-recon triage when you already know the IPs are safe.",
+			InputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"hosts": map[string]interface{}{
+						"type":        "array",
+						"description": "List of hostnames to check against scope rules.",
+						"items":       map[string]interface{}{"type": "string"},
+						"minItems":    float64(1),
+						"maxItems":    float64(100),
+					},
+				},
+				"required":             []string{"hosts"},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "array",
+				"items": map[string]interface{}{
+					"type": "object",
+					"properties": map[string]interface{}{
+						"host":     map[string]interface{}{"type": "string"},
+						"in_scope": map[string]interface{}{"type": "boolean"},
+						"reason":   map[string]interface{}{"type": "string"},
+					},
+				},
+			},
+		},
+		{
+			Name:        "health",
+			Description: "Returns the current health status of the proxy, MCP server, program scope, and kill switch. Useful for monitoring and diagnostics.",
+			InputSchema: map[string]interface{}{
+				"type":                 "object",
+				"properties":           map[string]interface{}{},
+				"required":             []string{},
+				"additionalProperties": false,
+			},
+			OutputSchema: map[string]interface{}{
+				"type": "object",
+				"properties": map[string]interface{}{
+					"proxy": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"status": map[string]interface{}{"type": "string"},
+							"listen": map[string]interface{}{"type": "string"},
+							"uptime": map[string]interface{}{"type": "string"},
+						},
+					},
+					"mcp": map[string]interface{}{
+						"type": "object",
+						"properties": map[string]interface{}{
+							"status": map[string]interface{}{"type": "string"},
+						},
+					},
+					"program_id":  map[string]interface{}{"type": "string"},
+					"kill_switch": map[string]interface{}{"type": "boolean"},
+				},
+			},
+		},
 	}
 
 	s.mu.RLock()
@@ -397,6 +458,12 @@ func (s *Server) callTool(ctx context.Context, name string, params map[string]in
 
 	case "run_recon_specialist", "run_vuln_specialist", "run_gate_specialist":
 		result, err = s.handleRunSpecialist(ctx, name, params)
+
+	case "validate_hosts":
+		result, err = s.handleValidateHosts(params)
+
+	case "health":
+		result = s.handleHealth()
 
 	default:
 		return nil, fmt.Errorf("unknown tool: %q", name)
@@ -599,4 +666,64 @@ func specialistTargets(raw interface{}) ([]string, error) {
 		return nil, fmt.Errorf("at most 100 targets are allowed")
 	}
 	return targets, nil
+}
+
+// --- New tool handlers ---
+
+type hostScopeResult struct {
+	Host    string `json:"host"`
+	InScope bool   `json:"in_scope"`
+	Reason  string `json:"reason"`
+}
+
+func (s *Server) handleValidateHosts(params map[string]interface{}) ([]hostScopeResult, error) {
+	hostsRaw, ok := params["hosts"]
+	if !ok {
+		return nil, fmt.Errorf("missing 'hosts' parameter")
+	}
+	hostsIface, ok := hostsRaw.([]interface{})
+	if !ok {
+		return nil, fmt.Errorf("'hosts' must be an array of strings")
+	}
+	if len(hostsIface) == 0 {
+		return nil, fmt.Errorf("'hosts' must contain at least one host")
+	}
+	if len(hostsIface) > 100 {
+		return nil, fmt.Errorf("'hosts' must contain at most 100 hosts")
+	}
+
+	results := make([]hostScopeResult, 0, len(hostsIface))
+	for i, h := range hostsIface {
+		host, ok := h.(string)
+		if !ok {
+			return nil, fmt.Errorf("'hosts' must be an array of strings (element %d is %T)", i, h)
+		}
+		if host == "" {
+			return nil, fmt.Errorf("'hosts' must not contain empty strings (element %d)", i)
+		}
+		// Pure scope rule check — no DNS, no IP blocklist.
+		dec := s.prx.IsHostInScope(host)
+		results = append(results, hostScopeResult{
+			Host:    host,
+			InScope: dec.InScope,
+			Reason:  dec.Reason,
+		})
+	}
+	return results, nil
+}
+
+func (s *Server) handleHealth() map[string]interface{} {
+	uptime := time.Since(s.startedAt).Round(time.Second).String()
+	return map[string]interface{}{
+		"proxy": map[string]interface{}{
+			"status": "ok",
+			"listen": s.prx.ListenAddr,
+			"uptime": uptime,
+		},
+		"mcp": map[string]interface{}{
+			"status": "ok",
+		},
+		"program_id":  s.prx.ProgramID,
+		"kill_switch": s.ks.IsActive(),
+	}
 }
